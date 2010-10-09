@@ -1,0 +1,151 @@
+* { margin: 0; padding: 0; }
+a { text-decoration: none; }
+html, body { height: 100%; width: 100%; overflow: hidden; }
+body { background-color: #fff; }
+
+#nav {
+  margin: 0 0 5px 0;
+  padding: 6px 0 8px 7px;
+  background: -webkit-gradient(linear, left top, left bottom, from(#5f5f5f), to(#3f3f3f));
+  /*background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#a4b357), color-stop(100%,#75890c)); */
+  -webkit-box-shadow: 0 1px 1px #1a1a1a;
+  cursor: default;
+}
+
+#sexpr {
+  float: right;
+  font-size: 10pt;
+  margin: 0 20px 0 0;
+  height: 22px;
+  width: 10em;
+  padding: 0 12px 0 34px;
+  outline: none;
+  background: #323232;
+  color: #eee;
+  -webkit-border-radius: 1.6em;
+  -webkit-box-shadow: 0 1px 1px #767676;
+  background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABYAAAAWCAYAAADEtGw7AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAN1wAADdcBQiibeAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAALrSURBVDiNtZTPS1RRFMe/d3xznzOT6ZA/8AX24I36YhZSkzKPqKCdBUkQ0SL7B2rnqphQR2YRGsGAm3YJURQUtEkXgbMY2mngomYR44yZuvJX/pjHjN8WPs3GGZWwAwfuu++cz33nvO+5giT+hymHvBcAXM56C8CRv6Ic2AVABeAB4HX21gFsAMg5hxxsJItdktSam5sHpJTjQoi0ECItpUwEAoEBkpoTUyp31/dB+/v7L0kpxwFk/H5/0rKsEcuyRvx+fxJAxu12j0ej0cuHwfc+uEhqqqqOSSknIpFIrFAo3CF5heSVQqFwJxKJxKSUE263+9Pi4qJOsuIoYE8wGHwEYKKvry9KMkhSISkcV0gGo9FoL4CJlpaWXpKew8AukrVer/eFpmlvSIYdUHGCQjKsadpLVVVfkax3cveBd6QkAHhyuVyVruvTAL4BKJT41wUAXw3DyNq2XQWg0sktKas/2lOU3MLCwtohcuLc3NymqqqbB6ltB0wAm42NjZmZmRkDwMniQ/fEn8xms2fq6uoyADZRZmj2TtVaZ2dnxrbt6vb29tsAfAAqsF2qcNa+UCh0y7btUx0dHd8B/Cpb3Z6GV9i2fb6tre2JEGLUsqwHJE+TrHL8dDgcvi+EGAUwEovFbhykClF0CampVOpmV1fXhVQqdU5KuVZTU5MFgKWlpSbbtn0AsgDyuq6nE4nE66ampp/YHvO/QMV9zLW2tn6cmpr6PDg4OGoYRnp1dbV2ZWWl3jTN9NDQ0Njk5OSXnp6e79PT0+cNw3gWj8dDKKWOMqUoJM+SvE6ym+Q9ktecvbp8Pn/VNM0+AM8VRXk3PDx80WmLKHdXFLvLGduKokHwzM7O3tV1/TGAuKIobx145VHB5VyQrJ6fn+8OBAIPATxVFOVVIpEwdya2lFaPYgSw3NDQ8CGZTP4wTfOny+VKr6+vn9gJKFbFv1jVxsbGta2tLa/P53sPYBkAjwMMABLbCtuV3XGB99lv/6SHumxIm4QAAAAASUVORK5CYII=) 8px 0px no-repeat, -webkit-gradient(linear, left top, left bottom, from(#222), to(#323232));
+  border: solid 0px;
+}
+
+#navli {
+  display: inline;
+  margin-left: 20px;
+}
+
+#navli li {
+  display: inline;
+  list-style: none;
+}
+
+#navli a {
+  font-family: sans-serif;
+  font-size: 10pt;
+  font-weight: bold;
+  color: #eee;
+  text-decoration: none;
+  padding: 4px 20px;
+  -webkit-border-radius: 1.6em;
+  text-shadow: 0 1px 1px rgba(0,0,0,.9);
+}
+
+.hl {
+  background: -webkit-gradient(linear, left top, left bottom, from(#ebebeb), to(#a1a1a1));
+  color: #000 !important;
+  border-top: solid 1px #fafafa;
+  -webkit-box-shadow: 0 1px 1px rgba(0,0,0,.2);
+  text-shadow: 0 1px 1px rgba(255,255,255,.9) !important;
+}
+
+#content {
+  height: 100%;
+  overflow: auto;
+  color: #111;
+}
+
+.result {
+  color: #222;
+  display: block;
+  width: 100%;
+  padding: 0 0 0 25px;
+  line-height: 1.4em;
+  -webkit-box-sizing: border-box;
+
+  /* For some reason webkit loses this setting on hover */
+  text-rendering: optimizeLegibility !important;
+}
+
+.result:hover {
+  background: #d0d0d0;
+}
+
+.results, .article {
+  text-rendering: optimizeLegibility !important;
+  font-family: IPAMincho,serif;
+  font-size: 13pt;
+}
+
+.article {
+  padding: 1em 2em 0 2em;
+  line-height: 1.4em !important;
+}
+
+.article-title {
+  font-size: 1.5em;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+
+/*
+ * Dictionary specific classes.
+ * TODO: Allow dynamic loading of custom CSS styles.
+ */
+.djs-lv1-item, .djs-lv2-item {
+  display: table;
+}
+
+.djs-lv1-text, .djs-lv2-text, .djs-lv1-number, .djs-lv2-number {
+  display: table-cell;
+}
+
+.djs-lv1-number, .djs-lv2-number {
+  width: 2em;
+}
+
+.djs-lv1-number {
+  font-family: IPAPMincho,serif;
+  font-size: 13pt;
+}
+
+.djs-section {
+  color: #000;
+  margin: 1em 0 0 0;
+}
+
+.djs-spec {
+  display: table;
+  margin: 1em 0 0 0;
+}
+
+.djs-spec-type, .djs-spec-text {
+  display: table-cell;
+}
+
+.djs-spec-text {
+  padding-left: 1em;
+  font-size: 10pt;
+  line-height: 1.4em;
+}
+
+.djs-spec-type {
+  width: 4em;
+  text-align: center;
+  font-size: 8pt;
+}
+
+.djs-spec-type p {
+  line-height: 1em;
+  color: #fff;
+  background-color: #000 !important;
+  padding: 3px 0 3px 0;
+}
