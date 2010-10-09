@@ -12,25 +12,12 @@ ArticleAction.prototype = {
     this.__proto__.__proto__.__init__.call(this);
     this._context = context;
     this._containerDom = containerDom;
+    this._articleAgent = new ArticleAgent(context);
     this._articleDom = $('<div class="article"></div>');
     this._articleGuid = null;
-    this._lastFetchId = null;
 
     $(this._articleDom).hide();
     $(this._containerDom).append(this._articleDom);
-  },
-
-  _handleAjaxSuccess: function(fetchId, jsonResponse) {
-    if (this._lastFetchId != fetchId)
-      return;
-
-    // Drop the response if it wasn't for the most recent request.
-    $(this._articleDom).html(jsonResponse.article);
-  },
-
-  _handleAjaxFailure: function(fetchId) {
-    if (this._lastFetchId != fetchId)
-      return;
   },
 
   _handleMouseUp: function(event) {
@@ -39,22 +26,21 @@ ArticleAction.prototype = {
 
   _update: function() {
     if ($(this._articleDom).is(':visible')) {
+      var self = this;
+
+      this._articleAgent.fetchArticle(
+        this._articleGuid,
+        function(text) {
+          $(self._articleDom).html(text);
+        },
+        function(message) {
+          // TODO: Add a better error page.
+          $(self._articleDom).html('An error occurred while fetching article');
+        }
+      );
+
       // TODO: Add the 'Loading ...' page.
       $(this._articleDom).html('');
-
-      var self = this;
-      this._lastFetchId = Math.random();
-
-      $.ajax({
-        url: 'article?id=' + this._context.id + '&guid=' + this._articleGuid,
-        success: function(r, s, xhr) {
-          self._handleAjaxSuccess.call(self, self._lastFetchId, r, s, xhr);
-        },
-        error: function(xhr, s, e) {
-          self._handleAjaxFailure.call(self, self._lastFetchId, xhr, s, e);
-        },
-        cache: true
-      });
     }
   },
 
@@ -86,8 +72,7 @@ ArticleAction.prototype = {
       $(this._articleDom).hide();
     }
   }
-}
-MergePrototype(ArticleAction.prototype, SignalUserPrototype);
+}; MergePrototype(ArticleAction.prototype, SignalUserPrototype);
 
 /**
  * SearchAction.
@@ -102,9 +87,9 @@ SearchAction.prototype = {
 
     this._context = context;
     this._containerDom = containerDom;
+    this._searchAgent = new SearchAgent(context);
     this._lastQuery = '';
     this._lastGoodQuery = '';
-    this._lastSearchId = null;
     this._scrollOffsetX = 0;
     this._resultsDom = $('<div class="results"></div>');
 
@@ -115,7 +100,7 @@ SearchAction.prototype = {
   /**
    * Redirects browser to article if user clicks on the search results link.
    */
-  _handleContainerClick: function(event) {
+  _handleClick: function(event) {
     if ($(event.target).hasClass('result')) {
       event.preventDefault();
 
@@ -125,56 +110,37 @@ SearchAction.prototype = {
   },
 
   /**
-   * Event handler that renders a search results page on successful search.
+   * Event handler for when search succeeds.
    */
-  _handleSuccess: function(searchId, query, jsonResponse) {
-    // Render results iff the current search is the most recent one.
-    if (searchId != this._lastSearchId)
-      return;
-
+  _handleSSuccess: function(query, results) {
     this._lastGoodQuery = query;
 
-    if ('error' in jsonResponse) {
-      // TODO: Display an error to user.
-      console.warning(jsonResponse['error']);
-      return;
+    var stringList = new Array();
+    var count = 0;
+
+    while (results.seekNext()) {
+      stringList.push('<a class="result" href="');
+      stringList.push(results.getArticleGuid());
+      stringList.push('">');
+      stringList.push(results.getArticleHeading());
+      stringList.push('</a>');
+      count++;
     }
 
-    var html = null;
-    var limit = jsonResponse[this._context.name].limit;
-    var results = jsonResponse[this._context.name].results;
-
-    if (results.length > 0) {
-      // Retrieved result set is not empty- render it.
-      var stringList = new Array();
-
-      for (var i = 0; i < results.length; i++) {
-        stringList.push('<a class="result" href="');
-        stringList.push(results[i][0]);
-        stringList.push('">');
-        stringList.push(results[i][1]);
-        stringList.push('</a>');
-      }
-
-      html = stringList.join('');
+    if (count > 0) {
+      $(this._resultsDom).html(stringList.join(''));
     } else {
-      // Got an empty result set- render the 'No Results' page.
-      html = ('No results for "' + query + '".');
+      $(this._resultsDom).html('No results for ' + query);
     }
 
-    $(this._resultsDom).html(html);
     $(this._contentDom).scrollTop(this._scrollOffsetX);
   },
 
   /**
-   * Event handler that renders a search results page in the case of a search
-   * failure.
+   * Event handler that is executed when search fails.
    */
-  _handleFailure: function(searchId, query, xhr, s, e) {
-    if (searchId != this._lastSearchId)
-      return;
-
-    console.log(xhr.responseText);
+  _handleSFailure: function(query, errorMessage) {
+    console.log(errorMessage);
 
     $(this._resultsDom).html('An error occurred while searching for ' + query);
   },
@@ -188,19 +154,12 @@ SearchAction.prototype = {
       // We need to do a search using new query.
       if (this._lastQuery.length > 0) {
         var self = this;
-        this._lastSearchId = Math.random();
 
-        $.ajax({
-          url: 'search?id=' + this._context.id + '&q=' +
-            encodeURIComponent(this._lastQuery),
-          success: function(r, s, xhr) {
-            self._handleSuccess(self._lastSearchId, self._lastQuery, r, s, xhr);
-          },
-          error: function(xhr, s, e) {
-            self._handleFailure(self._lastSearchId, self._lastQuery, xhr, s, e);
-          },
-          cache: true
-        });
+        this._searchAgent.search(
+          this._lastQuery,
+          function(results) { self._handleSSuccess(self._lastQuery, results); },
+          function(message) { self._handleSFailure(self._lastQuery, message); }
+        );
 
         // TODO: Display throbbler while waiting for search results.
       } else {
@@ -218,10 +177,8 @@ SearchAction.prototype = {
     if (!$(this._resultsDom).is(':visible')) {
       this.trigger('show');
 
-      $(this._containerDom).bind('click',
-                                 {self:this},
-                                 this._handleContainerClick);
       $(this._resultsDom).show();
+      $(this._containerDom).bind('click', {self:this}, this._handleClick);
 
       this._update();
     }
@@ -231,11 +188,11 @@ SearchAction.prototype = {
     if ($(this._resultsDom).is(':visible')) {
       this.trigger('hide');
 
-      // Save the scroll position so we can restore it if shown again.
+      // Save the scroll position so we can restore it, if shown again.
       this._scrollOffsetX = $(this._containerDom).scrollTop();
 
+      $(this._containerDom).unbind('click', this._handleClick);
       $(this._resultsDom).hide();
-      $(this._containerDom).unbind('click', this._handleContainerClick);
     }
   },
 
@@ -265,8 +222,9 @@ SearchAction.prototype = {
   setScrollOffset: function(offt) {
     this._scrollOffsetX = offt;
 
-    if ($(this._resultsDom).is(':visible'))
+    if ($(this._resultsDom).is(':visible')) {
       $(this._containerDom).scrollTop(offt);
+    }
   }
 }; MergePrototype(SearchAction.prototype, SignalUserPrototype);
 
@@ -275,7 +233,7 @@ SearchAction.prototype = {
   var textContainer = null;
   var tabsDom = null;
   var simplifyContext = null;
-  var sectionContexts = new Array();
+  var sectionContexts = [];
   var selectedSectionIndex = null;
   $.sections = {};
 
@@ -287,9 +245,27 @@ SearchAction.prototype = {
     cache: true
   });
 
+  var handleShowActionEvent = function(sectionIndex, sectionContext) {
+    if (selectedSectionIndex != null) {
+      sectionContexts[selectedSectionIndex].activeAction.hide();
+    }
+
+    sectionContext.activeAction = this;
+    selectedSectionIndex = sectionIndex;
+
+    document.title = sectionContext.dictionaryContext.name;
+
+    $('a', tabsDom).removeClass('hl');
+    $(sectionContext.radioElement).addClass('hl');
+  };
+
+  var handleHideActionEvent = function(sectionIndex, sectionContext) {
+    selectedSectionIndex = null;
+  };
+
   $.sections.init = function(sectionsContainer, contentContainer) {
-    var dictionaryContexts = simplifyContext['dicts'];
-    var html = new Array();
+    var dictionaryContexts = simplifyContext.dicts;
+    var html = [];
 
     tabsContainer = sectionsContainer;
     textContainer = contentContainer;
@@ -302,7 +278,7 @@ SearchAction.prototype = {
     for (var i = 0; i < dictionaryContexts.length; i++) {
       html.push('<li><a href="">');
       html.push(dictionaryContexts[i].name);
-      html.push('</a></li>')
+      html.push('</a></li>');
     }
 
     tabsDom = $(html.join(''));
@@ -338,61 +314,47 @@ SearchAction.prototype = {
         handleHideActionEvent.call(this, i, sectionContext);
       });
       actions.article.bind('articleChange', function() {
-        if (selectedSectionIndex != i)
+        if (selectedSectionIndex != i) {
           sectionContext.activeAction = sectionContext.actions.article;
+        }
       });
       actions.search.bind('queryChange', function() {
-        if (selectedSectionIndex != i)
+        if (selectedSectionIndex != i) {
           sectionContext.activeAction = sectionContext.actions.search;
+        }
       });
 
       sectionContexts.push(sectionContext);
     });
 
     $(sectionsContainer).append(tabsDom);
-  }
+  };
 
   $.sections.each = function(callback) {
-    for (var i = 0; i < sectionContexts.length; i++)
+    for (var i = 0; i < sectionContexts.length; i++) {
       callback(sectionContexts[i], i);
-  }
+    }
+  };
 
   $.sections.getSelectionDictionaryId = function() {
     return sectionContexts[selectedSectionIndex].dictionaryContext.id;
-  }
+  };
 
   $.sections.getSelectionIndex = function() {
     return selectedSectionIndex;
-  }
+  };
 
   $.sections.getSelectionActions = function() {
     return sectionContexts[selectedSectionIndex].actions;
-  }
+  };
 
   $.sections.selectSectionByIndex = function(index) {
     sectionContexts[index].activeAction.show();
-  }
+  };
 
   $.sections.getSectionCount = function() {
     return $('a', tabsDom).length;
-  }
-
-  function handleShowActionEvent(sectionIndex, sectionContext) {
-    if (selectedSectionIndex != null)
-      sectionContexts[selectedSectionIndex].activeAction.hide();
-
-    sectionContext.activeAction = this;
-    selectedSectionIndex = sectionIndex;
-
-    document.title = sectionContext.dictionaryContext.name;
-
-    $('a', tabsDom).removeClass('hl');
-    $(sectionContext.radioElement).addClass('hl');
-  }
-
-  function handleHideActionEvent(sectionIndex, sectionContext) {
-    selectedSectionIndex = null;
-  }
+  };
 })(jQuery);
 
 function dispatch(event) {
