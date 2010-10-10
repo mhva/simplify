@@ -101,7 +101,7 @@ u8R"#(
         return heading;
     }
 
-    function _ProcessShortHeading(heading) {
+    function _ProcessTags(heading) {
         return '';
     }
 

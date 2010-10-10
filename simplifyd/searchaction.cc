@@ -81,14 +81,14 @@ void SearchAction::SearchDict(simplify::Repository &repository,
                               HttpResponse &response)
 {
     // TODO: Make the limit tweakable.
-    size_t result_limit = 1000;
+    size_t result_limit = 800;
 
     simplify::Likely<simplify::Dictionary::SearchResults *> likely_results =
         dict.Search(expr, result_limit);
     std::string &body = response.GetBody();
 
     if (!likely_results) {
-        body.append("{\"error\"=\"") \
+        body.append("{\"error\":\"") \
             .append(likely_results.error_code().message()) \
             .append("\"}");
         return;
@@ -184,20 +184,21 @@ void SearchAction::SearchDict(simplify::Repository &repository,
             }
 
             likely_length =
-                results->FetchShortHeading(data_buffer,
-                                           likely_length,
-                                           text_buffer,
-                                           sizeof(text_buffer));
+                results->FetchTags(data_buffer,
+                                   likely_length,
+                                   text_buffer,
+                                   sizeof(text_buffer));
             if (likely_length) {
+                // Only append tags if the string is not empty.
                 if (likely_length > 0) {
                     body.append("\"")
                         .append(text_buffer, likely_length)
                         .append("\",");
                 }
             } else {
-                std::cout << "An error occurred while retrieving a short "
-                          << "heading for a search result with GUID "
-                          << text_buffer << " from " << dict.GetName() << ": "
+                std::cout << "An error occurred while retrieving tags for a "
+                          << "search entry with GUID " << text_buffer
+                          << " from " << dict.GetName() << ": "
                           << likely_length.error_code().message() << std::endl;
                 body.erase(result_start);
             }

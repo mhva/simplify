@@ -144,7 +144,7 @@ enum class JsFunction : size_t {
     EndDecoration       = 15,
     InsertTextGaiji     = 16,
     ProcessHeading      = 17,
-    ProcessShortHeading = 18,
+    ProcessTags         = 18,
     ProcessText         = 19,
     InsertHeadingGaiji  = 20
 };
@@ -168,7 +168,7 @@ static const char *g_js_function_names[] = {
     /* JsFunction:15 */ "EndDecoration",
     /* JsFunction:16 */ "InsertTextGaiji",
     /* JsFunction:17 */ "ProcessHeading",
-    /* JsFunction:18 */ "ProcessShortHeading",
+    /* JsFunction:18 */ "ProcessTags",
     /* JsFunction:19 */ "ProcessText",
     /* JsFunction:20 */ "InsertHeadingGaiji"
 };
@@ -379,7 +379,7 @@ static v8::Handle<v8::Value> Print(const v8::Arguments &args)
 
     for (size_t i = 0; i < (size_t)args.Length(); i++) {
         v8::String::Utf8Value str(args[i]);
-        std::cout << *str;
+        std::cout << *str << " ";
     }
 
     std::cout << std::endl;
@@ -452,7 +452,7 @@ public:
         eb_code = eb_set_hooks(&text_hookset_, g_text_hooks);
         assert(eb_code == EB_SUCCESS);
 
-        v8::Locker v8lock;
+        v8::Locker lock;
         v8::HandleScope handle_scope;
         v8::Handle<v8::ObjectTemplate> global = v8::ObjectTemplate::New();
 
@@ -517,7 +517,6 @@ public:
         using namespace v8;
 
         Locker v8_lock;
-        TryCatch try_catch;
         HandleScope handle_scope;
         Context::Scope context_scope(js_context_);
         Handle<Value> result;
@@ -852,13 +851,13 @@ public:
             return error;
     }
 
-    Likely<size_t> FetchShortHeading(const char *data,
-                                     size_t data_length,
-                                     char *buffer,
-                                     size_t buffer_size) {
+    Likely<size_t> FetchTags(const char *data,
+                             size_t data_length,
+                             char *buffer,
+                             size_t buffer_size) {
         std::error_code error;
         size_t length = d->PipeStringThroughJsFunction(
-                JsFunction::ProcessShortHeading,
+                JsFunction::ProcessTags,
                 data,
                 data_length,
                 buffer,
@@ -898,10 +897,13 @@ private:
     EB_Hit *hits_;
 };
 
-EpwingDictionary::EpwingDictionary(Config *conf)
-    : Dictionary(conf),
-      d(new Private(this))
+EpwingDictionary::EpwingDictionary(Config *conf) : Dictionary(conf)
 {
+    // Instantiate Locker before doing anything JS related to let v8 know
+    // that we might be using threads.
+    v8::Locker lock;
+
+    d = new Private(this);
 }
 
 EpwingDictionary::~EpwingDictionary()
@@ -1116,6 +1118,50 @@ Likely<size_t> EpwingDictionary::ReadText(const char *guid,
         return last_error;
 }
 
+Likely<Dictionary::SearchResults *> EpwingDictionary::GetResults(
+                                                             size_t max_count)
+{
+    EB_Error_Code eb_code;
+    size_t total_count = 0;
+    int increase_step = 256;
+
+    struct SearchResultsMemoryLayout {
+        uint8_t results[sizeof(EbSearchResults)];
+        EB_Hit hits[];
+    } *sr = NULL;
+
+    while (true) {
+        int step = std::min(max_count - total_count, (size_t)increase_step);
+
+        sr = static_cast<SearchResultsMemoryLayout *>(
+                realloc(sr, sizeof(SearchResultsMemoryLayout) + \
+                            total_count * sizeof(EB_Hit)      + \
+                            step * sizeof(EB_Hit)));
+
+        int hit_count;
+        eb_code = eb_hit_list(&d->book_,
+                              step,
+                              sr->hits + total_count,
+                              &hit_count);
+
+        if (eb_code == EB_SUCCESS) {
+            total_count += hit_count;
+
+            // Be done, if the number of returned hits is less than the number
+            // of items we've allocated or we've reached maximum number of
+            // results.
+            if (hit_count < step || total_count >= max_count)
+                break;
+        } else {
+            return make_error_code(static_cast<eb_error>(eb_code));
+        }
+    }
+
+    SearchResults *results =
+        new(sr->results) EbSearchResults(d, total_count, sr->hits);
+    return results;
+}
+
 Likely<EpwingDictionary *> EpwingDictionary::New(const char *path,
                                                  Config *conf)
 {
@@ -1166,50 +1212,6 @@ std::error_code EpwingDictionary::Initialize()
     // TODO: Notify if we've failed to load user scripts.
     d->PopulateJsContext();
     return last_error;
-}
-
-Likely<Dictionary::SearchResults *> EpwingDictionary::GetResults(
-                                                             size_t max_count)
-{
-    EB_Error_Code eb_code;
-    size_t total_count = 0;
-    int increase_step = 256;
-
-    struct SearchResultsMemoryLayout {
-        uint8_t results[sizeof(EbSearchResults)];
-        EB_Hit hits[];
-    } *sr = NULL;
-
-    while (true) {
-        int step = std::min(max_count - total_count, (size_t)increase_step);
-
-        sr = static_cast<SearchResultsMemoryLayout *>(
-                realloc(sr, sizeof(SearchResultsMemoryLayout) + \
-                            total_count * sizeof(EB_Hit)      + \
-                            step * sizeof(EB_Hit)));
-
-        int hit_count;
-        eb_code = eb_hit_list(&d->book_,
-                              step,
-                              sr->hits + total_count,
-                              &hit_count);
-
-        if (eb_code == EB_SUCCESS) {
-            total_count += hit_count;
-
-            // Be done, if the number of returned hits is less than the number
-            // of items we've allocated or we've reached maximum number of
-            // results.
-            if (hit_count < step || total_count >= max_count)
-                break;
-        } else {
-            return make_error_code(static_cast<eb_error>(eb_code));
-        }
-    }
-
-    SearchResults *results =
-        new(sr->results) EbSearchResults(d, total_count, sr->hits);
-    return results;
 }
 
 inline static EB_Error_Code WriteByteRange(EB_Book *book,
