@@ -1,4 +1,4 @@
-// Copyright 2006-2009 the V8 project authors. All rights reserved.
+// Copyright 2010 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -3537,7 +3537,7 @@ class SharedFunctionInfo: public HeapObject {
   //  Important: inobject slack tracking is not attempted during the snapshot
   //  creation.
 
-  static const int kGenerousAllocationCount = 16;
+  static const int kGenerousAllocationCount = 8;
 
   // [construction_count]: Counter for constructor calls made during
   // the tracking phase.
@@ -3620,6 +3620,9 @@ class SharedFunctionInfo: public HeapObject {
   // all functions are anonymous but are assigned to object
   // properties.
   DECL_ACCESSORS(inferred_name, String)
+
+  // The function's name if it is non-empty, otherwise the inferred name.
+  String* DebugName();
 
   // Position of the 'function' token in the script source.
   inline int function_token_position();
