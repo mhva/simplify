@@ -57,8 +57,7 @@ void ArticleAction::Handle(simplify::Repository &repository,
         return;
     }
 
-    // FIXME: Reduce the buffer size;
-    size_t buffer_size = 4 * 8192;
+    size_t buffer_size = 16 * 1024;
 
     while (true) {
         char buffer[buffer_size];
@@ -67,36 +66,16 @@ void ArticleAction::Handle(simplify::Repository &repository,
             dict->ReadText(guid, buffer, buffer_size);
 
         if (likely_length) {
-            // Successfully read the article text. Just before we send a JSON
-            // response to the user, we need to escape special characters
-            // in the article text to avoid producing a malformed JSON.
-            size_t length = likely_length;
-            size_t result_size = length * 1.5f;
-            char result_buffer[result_size];
-
-
-            size_t result_length = simplify::EscapeDoubleQuotes(buffer,
-                                                                length,
-                                                                result_buffer,
-                                                                result_size);
-            if (result_length != (size_t)-1) {
-                body.append("{\"article\":\"")
-                    .append(result_buffer, result_length)
-                    .append("\"}");
-                break;
-            } else {
-                // FIXME: Properly handle the buffer exhasuted condition.
-                body.append("{\"error\":\"Allocated buffer was not large "
-                            "enough to store an escaped string\"");
-                return;
-            }
+            body.append("{\"article\":\"")
+                .append(buffer, (size_t)likely_length)
+                .append("\"}");
+            break;
         } else if (likely_length.error_code() ==
                         simplify::simplify_error::buffer_exhausted) {
             // Looks like the size of the buffer was not large enough.
             // Increase it just a tiny little bit and attempt to read the
             // article again.
             buffer_size += 4096;
-            std::cout << "Buffer is too small" << std::endl;
         } else {
             // Bail out if something bad happened.
             body.append("{\"error\":\"An error occurred while retrieving "
