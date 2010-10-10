@@ -621,27 +621,59 @@ HeadingProcessor.prototype = {
   ProcessHeading: (function() {
     var matchHiraganaKatakanaRe = /[あ-ヺ]/;
 
-    return function(text) {
+    return function(heading) {
       // Headings containing one character are often represent an entry
       // describing Kanji. These entries are not very useful so we drop them.
-      if (text.length > 1) {
-        text = this._JoinKanjiParts(text);
-        text = this._StripGarbageChars(text);
-        text = this._TranslateFullWidthLatin(text);
+      if (heading.length > 1) {
+        heading = this._JoinKanjiParts(heading);
+        heading = this._StripGarbageChars(heading);
+        heading = this._TranslateFullWidthLatin(heading);
 
-        return EscapeJsonString(text);
+        // HACK: Save the result so the ProcessTags can later pick it up and
+        // avoid burning unneccessary CPU cycles.
+        this.processedHeading = heading;
+
+        return EscapeJsonString(heading);
       } else {
         // Be 100% that we are skipping a Kanji entry. There're some headings
         // containing only 1 hiragana/katakana char and we don't want to drop
         // those.
-        if (matchHiraganaKatakanaRe.test(text)) {
-          return text;
+        if (matchHiraganaKatakanaRe.test(heading)) {
+          this.processedHeading = heading;
+          return heading;
         } else {
+          this.processedHeading = null;
           return null;
         }
       }
     };
-  })()
+  })(),
+
+  ProcessTags: function(heading) {
+    var tagSource;
+
+    if (this.processedHeading !== undefined) {
+      tagSource = this.processedHeading;
+      this.processedHeading = undefined;
+    } else {
+      tagSource = this.ProcessHeading();
+    }
+
+    if (tagSource !== null && tagSource[tagSource.length - 1] == '】') {
+      var left = tagSource.indexOf('【');
+
+      if (left != -1) {
+        var tags = tagSource.slice(left + 1, tagSource.length - 1).split('・');
+        tags.push(tagSource.slice(0, left));
+
+        return EscapeJsonString(tags.join(','));
+      } else {
+        return '';
+      }
+    } else {
+      return '';
+    }
+  }
 };
 
 // ====================================================================
@@ -687,12 +719,16 @@ function EndKeyword() {
   return '';
 }
 
-ProcessHeading = (function() {
+(function() {
   var headingProcessor = new HeadingProcessor();
 
-  return function(text) {
+  ProcessHeading = function(text) {
     return headingProcessor.ProcessHeading(text);
-  }
+  };
+
+  ProcessTags = function(text) {
+    return headingProcessor.ProcessTags(text);
+  };
 })();
 
 ProcessText = (function() {

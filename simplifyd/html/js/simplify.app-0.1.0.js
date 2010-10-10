@@ -15,13 +15,55 @@ ArticleAction.prototype = {
     this._articleAgent = new ArticleAgent(context);
     this._articleDom = $('<div class="article"></div>');
     this._articleGuid = null;
+    this._inlineDom = $('<div class="inline-article"></div>');
 
     $(this._articleDom).hide();
     $(this._containerDom).append(this._articleDom);
+    $(this._containerDom).append(this._inlineDom);
+
+    $(this._inlineDom).overlay();
   },
 
   _handleMouseUp: function(event) {
     var self = event.data.self;
+    var text = window.getSelection().toString();
+
+    if (text.length > 0) {
+      var overlay = $(self._inlineDom).data('overlay');
+      var containerWidth = $(self._containerDom).outerWidth();
+      var containerHeight = $(self._containerDom).outerHeight();
+
+      var sa = new SearchAgent(self._context);
+      sa.search(text,
+        function(r) {
+
+          if (r.seekMagic(text)) {
+            var aa = new ArticleAgent(self._context);
+
+            aa.fetchArticle(r.getArticleGuid(), function(text) {
+                $(self._inlineDom).html(text);
+                $(self._inlineDom).expose({
+                  loadSpeed: 400,
+                  color: 'rgba(0,0,0,.5)',
+                  onBeforeLoad: function() {
+                    overlay.load();
+                  },
+                  onBeforeClose: function() {
+                    overlay.close();
+                  }
+                });
+            }, undefined);
+          }
+        },
+        undefined);
+
+      $(self._inlineDom).width(containerWidth - 120);
+      $(self._inlineDom).height(containerHeight - 100);
+      overlay.getConf().top = $(self._containerDom).offset().top +
+        (containerHeight - $(self._inlineDom).outerHeight()) / 2;
+      overlay.getConf().left = $(self._containerDom).offset().left +
+        (containerWidth - $(self._inlineDom).outerWidth()) / 2 - 3;
+    }
   },
 
   _update: function() {

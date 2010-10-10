@@ -81,7 +81,7 @@ body { background-color: #fff; }
 
 .results, .article {
   text-rendering: optimizeLegibility !important;
-  font-family: IPAMincho,serif;
+  font-family: 'Droid Serif',IPAMincho,serif;
   font-size: 13pt;
 }
 
@@ -94,6 +94,18 @@ body { background-color: #fff; }
   font-size: 1.5em;
   font-weight: bold;
   margin-bottom: 5px;
+}
+
+.inline-article {
+  display: none;
+  background: #000;
+  background: rgba(0,0,0,.85);
+  color: #eee;
+  z-index: 10000;
+  padding: 8px 8px 8px 8px;
+  overflow: auto;
+  -webkit-box-shadow: 0 1px 30px rgba(0,0,0,.6);
+  -webkit-border-radius: 6px;
 }
 
 /*
@@ -118,7 +130,6 @@ body { background-color: #fff; }
 }
 
 .djs-section {
-  color: #000;
   margin: 1em 0 0 0;
 }
 

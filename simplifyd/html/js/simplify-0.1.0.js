@@ -94,6 +94,23 @@ ResultsContainer.prototype = {
   },
 
   seekMagic: function(text) {
+    for (var i = 0; i < this._resultSet.length; i++) {
+      var tagString = this._resultSet[i][2];
+
+      if (tagString === undefined) {
+        continue;
+      }
+
+      var tags = tagString.split(',');
+      for (var t = 0; t < tags.length; t++) {
+        console.log(tags[t] + ' == ' + text + '?');
+        if (tags[t] === text) {
+          this._offset = i;
+          return true;
+        }
+      }
+    }
+
     return false;
   },
 
