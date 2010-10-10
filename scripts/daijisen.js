@@ -1,3 +1,7 @@
+// ====================================================================
+// CharMapper.
+// ====================================================================
+
 /**
  * Maps a range of characters to a different range of characters.
  *
@@ -12,10 +16,10 @@
  * <length> - Range length.
  */
 function CharMapper() {
-  this.ranges = new Array();
+  this.ranges = [];
 
   for (var i = 0; i < arguments.length; i++) {
-    // TODO: Ensure that the range is correct.
+    // TODO: Add sanity checks for range.
     this.ranges.push(arguments[i]);
   }
 }
@@ -31,8 +35,9 @@ CharMapper.prototype = {
     for (var i = 0; i < this.ranges.length; i++) {
       var range = this.ranges[i];
 
-      if (charCode >= range[0] && charCode < range[0] + range[2])
+      if (charCode >= range[0] && charCode < range[0] + range[2]) {
         return range[1] + (charCode - range[0]);
+      }
     }
 
     return undefined;
@@ -122,33 +127,526 @@ CharMapper.prototype = {
     for (var i = 0; i < this.ranges.length; i++) {
       var range = this.ranges[i];
 
-      if (index < delta + range[2])
+      if (index < delta + range[2]) {
         return String.fromCharCode(range[1] + (index - delta));
-      else
+      } else {
         delta += range[2];
+      }
     }
 
     return undefined;
   }
-}
+};
 
-var gaijiRangeMap = {
-  lv0 : new CharMapper([0xc437, 0x2160 /* Ⅰ */ , 6 /* VI */]),
-  lv05: new CharMapper([0xc431, 0x3220 /* ㈠ */, 5  /* ㈤ */]),
-  lv1 : new CharMapper([0xc373, 0x2460 /* ① */ , 12 /* ⑫ */],
-                       [0xc421, 0x246c /* ⑬ */ , 8  /* ⑳ */],
-                       [0xc429, 0x3251 /* ㉑ */, 5  /* ㉕ */],
-                       [0xc440, 0x3256 /* */, 7, /* */]),
-  lv2 : new CharMapper([0xb646, 0x32d0 /* ㋐ */, 8  /* ㋗ */],
-                       [0xb322, 0x32d8 /* ㋘ */, 6 /* ㋛ */]),
-  spec: new CharMapper([0xb64e, 0x2488, 2])
-}
+// ====================================================================
+// Global Gaiji mappings.
+// ====================================================================
 
 var gaijiMap = {
   0xb424: '↔',
   0xb852: '⇨',
-  0xc455: '(文)'
-}
+  0xc455: '(文)',
+  0xa330: 'ū',
+  0xa224: 'ā',
+  0xa36d: 'ī'
+};
+
+var articleGaijiRanges = {
+  lexicalCategory : new CharMapper([0xc437, 0x2160 /* Ⅰ */ , 6  /* VI */]),
+  unknownCategory : new CharMapper([0xc431, 0x3220 /* ㈠ */, 5  /* ㈤ */]),
+  meaningNumber   : new CharMapper([0xc373, 0x2460 /* ① */ , 12 /* ⑫ */],
+                                   [0xc421, 0x246c /* ⑬ */ , 8  /* ⑳ */],
+                                   [0xc429, 0x3251 /* ㉑ */, 5  /* ㉕ */],
+                                   [0xc440, 0x3256 /* ㉖ */, 7  /* ㉝ */]),
+  subMeaningNumber: new CharMapper([0xb646, 0x32d0 /* ㋐ */, 8  /* ㋗ */],
+                                   [0xb322, 0x32d8 /* ㋘ */, 6  /* ㋛ */]),
+  spec            : new CharMapper([0xb64e, 0x2488 /* ⒈ */ , 5])
+};
+
+// ====================================================================
+// Utility functions.
+// ====================================================================
+
+/**
+ * Returns a new string with special JSON characters escaped.
+ */
+var EscapeJsonString = (function() {
+  var matchJsonSpecialCharsRe = /["\\]/g;
+  var replaceFun = function($0) {
+    return '\\' + $0;
+  };
+
+  return function(string) {
+    return string.replace(matchJsonSpecialCharsRe, replaceFun);
+  };
+})();
+
+// ====================================================================
+// TextProcessor.
+// ====================================================================
+
+function TextProcessor() {}
+TextProcessor.prototype = {
+  /**
+   * Escapes list numbers that are enclosed into certain brackets.
+   * These list numbers are known to be references.
+   *
+   * Each such number occurrence is replaced with numeric character reference.
+   */
+  _EscapeEnclosedListNumbers: (function() {
+    var matchListNumberRe =
+      new RegExp('[' +
+                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
+                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
+                 articleGaijiRanges.meaningNumber.GetRegexpRange() +
+                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
+                 ']');
+
+    return function(text) {
+      var chunks = [];
+
+      var left = '（［「《〈';
+      var right = '〉》」］）';
+
+      var openCount = 0;
+      var sliceFrom = 0;
+
+      for (var i = 0; i < text.length; i++) {
+        var lindex;
+        var rindex;
+
+        if (matchListNumberRe.test(text[i])) {
+          if (openCount > 0) {
+            chunks.push(text.slice(sliceFrom, i));
+            chunks.push('&#' + text[i].charCodeAt(0) + ';');
+          } else {
+            chunks.push(text.slice(sliceFrom, i + 1));
+          }
+
+          sliceFrom = i + 1;
+        } else if ((lindex = left.indexOf(text[i])) != -1) {
+          openCount++;
+        } else if ((rindex = right.indexOf(text[i])) != -1) {
+          if (openCount > 0) {
+            openCount--;
+          } else {
+            print('Mismatched parentheses in text at offset ' + i);
+          }
+        }
+      }
+
+      if (sliceFrom < text.length) {
+        chunks.push(text.slice(sliceFrom));
+      }
+
+      if (openCount > 0) {
+        print('Got some unclosed parentheses in text');
+      }
+
+      return chunks.join('');
+    };
+  })(),
+
+  /**
+   * Escapes list numbers that are references in disguise.
+   *
+   * The text representation of these references is indistinguishable from
+   * either Lexical Category Numbers, or [Unknown] Category Numbers, or
+   * Meaning Numbers. This function tries its best to escape these references.
+   */
+  _EscapeInTextReferences: (function() {
+    var checkpointRe =
+      new RegExp('[' +
+                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
+                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
+                 articleGaijiRanges.meaningNumber.GetRegexpRange() +
+                 ']', 'g');
+
+    var actors = [
+      {
+        mapper: articleGaijiRanges.meaningNumber,
+        last  : null,
+        reset : function() {}
+      },
+      {
+        mapper: articleGaijiRanges.lexicalCategory,
+        last  : null,
+        reset : function() { actors[0].last = null; }
+      },
+      {
+        mapper: articleGaijiRanges.unknownCategory,
+        last  : null,
+        reset : function() { actors[0].last = null; }
+      }
+    ];
+
+    // A function that will be called on each matching list number and will
+    // determine whether the passed list number is a reference or not.
+    var replaceFun = function($0) {
+      for (var i = 0; i < actors.length; i++) {
+        var actor = actors[i];
+        var number = actor.mapper.GetDstCharDelta($0) + 1;
+
+        if (!isNaN(number)) {
+          if ((actor.last === null && number == 1) || number == actor.last + 1){
+            actor.last = number;
+            actor.reset();
+            return $0;
+          } else {
+            return '&#' + $0.charCodeAt(0) + ';';
+          }
+        }
+      }
+
+      print('BUG: Shouldn\'t be here. Match: ' + $0);
+      return $0;
+    };
+
+    return function(text) {
+      text = this._EscapeEnclosedListNumbers(text);
+
+      // Reset each actor's state.
+      for (var i = 0; i < actors.length; i++) {
+        actors[i].last = null;
+      }
+
+      return text.replace(checkpointRe, replaceFun);
+    };
+  })(),
+
+  /**
+   * Escapes all list numbers in the given string. Each number occurrence will
+   * be converted into HTML numberic character code.
+   */
+  _EscapeListNumbers: (function() {
+    var matchListNumberRe =
+      new RegExp('[' +
+                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
+                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
+                 articleGaijiRanges.meaningNumber.GetRegexpRange() +
+                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
+                 ']', 'g');
+
+    var replaceFun = function($0) {
+      return '&#' + $0.charCodeAt(0) + ';';
+    };
+
+    return function(text) {
+      return text.replace(matchListNumberRe, replaceFun);
+    };
+  })(),
+
+  /**
+   * Finds and encloses article's title into HTML tags.
+   */
+  _DecorateTitle: (function() {
+    var matchTitleRe = /^\s*(.*?)␊\s*/;
+    var replaceFun = function($0, $1) {
+      return '<div class="article-title djs-title">' + $1 + '</div>';
+    };
+
+    return function(text) {
+      return text.replace(matchTitleRe, replaceFun);
+    };
+  })(),
+
+  /**
+   * Finds and encloses category titles into HTML tags.
+   */
+  _DecorateCategories: (function() {
+    var matchNumberedLexCatRe =
+      new RegExp('[' +
+                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
+                 '][^␊◆' +
+                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
+                 articleGaijiRanges.meaningNumber.GetDstCharWithIndex(0) +
+                ']*', 'g');
+
+    var matchNumberedUnkCatRe =
+      new RegExp('[' +
+                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
+                 '][^␊◆' +
+                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
+                 articleGaijiRanges.meaningNumber.GetDstCharWithIndex(0) +
+                 ']*', 'g');
+
+    var matchSingularLexCatRe =
+      new RegExp('(^.*?␊)(.*?)([' +
+                 articleGaijiRanges.meaningNumber.GetDstCharWithIndex(0) +
+                 '])');
+
+    return function(text) {
+      // Replace [Unknown] Category items.
+      text = text.replace(matchNumberedUnkCatRe, function($0) {
+        return '␊<div class="djs-section">' + $0 + '</div>';
+      });
+
+      // Replace numbered Lexical Category items.
+      var hasMatches = false;
+
+      text = text.replace(matchNumberedLexCatRe, function($0) {
+        hasMatches = true;
+        return '␊<div class="djs-section">' + $0 + '</div>';
+      });
+
+      // Finish if we have found numbered list items. None of other section
+      // forms are possible in this text.
+      if (hasMatches) {
+        return text;
+      }
+
+      // Try to find one and only one unnumbered item. Daijisen doesn't number
+      // sections if there is only one section.
+      text = text.replace(matchSingularLexCatRe, function($0, $1, $2, $3) {
+        hasMatches = true;
+        return $1 + '<div class="djs-section">' + $2 + '</div>' + $3;
+      });
+
+      return text;
+    };
+  })(),
+
+  /**
+   * Helper function for finding and enclosing sub-meanings into HTML tags.
+   *
+   * The string must be a text of parent meaning.
+   */
+  _DecorateSubMeanings: (function() {
+    var matchSubMeaningRe =
+      new RegExp('([' +
+                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
+                 '])([^' +
+                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
+                 ']+)', 'g');
+
+    var replaceFun = function($0, $1, $2) {
+      return '<div class="djs-lv2-item"><span class="djs-lv2-number">' + $1 +
+        '</span><span class="djs-lv2-text">' + $2 + '</span></div>';
+    };
+
+    return function(meaningText) {
+      return meaningText.replace(matchSubMeaningRe, replaceFun);
+    };
+  })(),
+
+  /**
+   * Finds and encloses meanings and sub-meanings into HTML tags.
+   */
+  _DecorateMeanings: (function() {
+    var matchMeaningRe =
+      new RegExp('([' +
+                 articleGaijiRanges.meaningNumber.GetRegexpRange() +
+                '])([^␊◆' +
+                 articleGaijiRanges.meaningNumber.GetRegexpRange() +
+                ']+)', 'g');
+
+    var mapper = articleGaijiRanges.meaningNumber;
+
+    return function(text) {
+      var self = this;
+
+      return text.replace(matchMeaningRe, function($0, $1, $2) {
+        var number = mapper.GetDstCharDelta($1) + 1;
+
+        return '<div class="djs-lv1-item"><span class="djs-lv1-number">' +
+          number + '</span><span class="djs-lv1-text">' +
+          self._DecorateSubMeanings($2) + '</span></div>';
+      });
+    };
+  })(),
+
+  /**
+   * Finds and encloses special sections(e.g. 類語,下接句 ...) into HTML tags.
+   */
+  _DecorateSpecialSections: (function() {
+    var matchSpecialSectionRe =
+      new RegExp('␊［(下接句|下接語|可能|類語|用法|派生|形動)］([^◆␊' +
+                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
+                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
+                ']*)', 'g');
+
+    var matchRuigoSectionRe =
+      new RegExp('◆([^␊◆' +
+                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
+                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
+                ']*)', 'g');
+
+    var Decorate = function(name, text) {
+      return '␊<div class="djs-spec"><span class="djs-spec-type"><p>' + name +
+        '</p></span><span class="djs-spec-text">' +
+        this._EscapeListNumbers(text) + '</span></div>';
+    };
+
+    return function(text) {
+      var self = this;
+
+      text = text.replace(matchSpecialSectionRe, function($0, $1, $2) {
+        return Decorate.call(self, $1, $2);
+      });
+
+      text = text.replace(matchRuigoSectionRe, function($0, $1) {
+        return Decorate.call(self, '補説', $1);
+      });
+
+      return text;
+    };
+  })(),
+
+  /**
+   * Strips garbage characters that we were using as stop chars or something
+   * else unworthy from string.
+   *
+   * Should be used after the main processing is done.
+   */
+  _StripGarbage: (function() {
+    var matchGarbageCharsRe = /␊/g;
+
+    return function(text) {
+      return text.replace(matchGarbageCharsRe, '');
+    };
+  })(),
+
+  ProcessText: function(text) {
+    text = this._EscapeInTextReferences(text);
+    text = this._DecorateSpecialSections(text);
+    text = this._DecorateCategories(text);
+    text = this._DecorateMeanings(text);
+    text = this._DecorateTitle(text);
+    text = this._StripGarbage(text);
+
+    return EscapeJsonString(text);
+  }
+};
+
+// ====================================================================
+// HeadingProcessor.
+// ====================================================================
+
+function HeadingProcessor() {}
+HeadingProcessor.prototype = {
+  /**
+   * Joins multiple, so called 'Kanji Parts' (text enclosed into 【】) into
+   * one.
+   *
+   * As a side effect, pronunciations will be also removed. It's not like
+   * they mattered anyway.
+   */
+  _JoinKanjiParts: function(text) {
+    var left1;
+    var right1;
+
+    if ((left1 != text.indexOf('【')) != -1 &&
+        (right1 = text.indexOf('】', left1)) != -1) {
+      var chunks = [text.slice(0, right1)];
+      var left2;
+      var right2;
+
+      if ((left2 = text.indexOf('【', right1)) != -1 &&
+          (right2 = text.indexOf('】', left2)) != -1) {
+        chunks.push('・');
+        chunks.push(text.slice(left2 + 1, right2));
+      }
+
+      chunks.push('】');
+      return chunks.join('');
+    } else {
+      return text;
+    }
+  },
+
+  /**
+   * Strips some characters from the heading. These characters are used to
+   * show which writings are old Japanese or deprecated, separate hiragana
+   * readings, etc...
+   *
+   * The problem with these characters that they clutter search results too
+   * much. These characters can still be seen in the article page.
+   */
+  _StripGarbageChars: (function() {
+    var Strip = function(text, startAt, inferior, stopOn, out) {
+      var i = startAt;
+      var sliceFrom = startAt;
+
+      for (; i < text.length && text[i] != stopOn; i++) {
+        if (inferior.indexOf(text[i]) == -1) {
+          // An empty branch to aid branch predicition mechanism (hopefully).
+        } else {
+          out.push(text.slice(sliceFrom, i));
+          sliceFrom = i + 1;
+        }
+      }
+
+      out.push(text.slice(sliceFrom, i + 1));
+      return i;
+    };
+
+    return function(text) {
+      var chunks = [];
+      var stoppedAt = Strip(text, 0, '‐・', '【', chunks);
+
+      // Sanitiaze the so called 'Kanji Part' (text enclosed into 【】),
+      // if any.
+      if (stoppedAt < text.length) {
+        stoppedAt = Strip(text, stoppedAt + 1, '‐＝△×', '】', chunks);
+
+        // Ensure that we have parsed the whole string.
+        if (stoppedAt + 1 >= text.length) {
+          return chunks.join('');
+        } else {
+          print('BUG: Unexpected string continuation in: ' + text + '. ' +
+                'Did you join kanji parts?');
+          return text;
+        }
+      } else {
+        return chunks.join('');
+      }
+    };
+  })(),
+
+  /**
+   * Translates full-width Latin characters into Basic form.
+   */
+  _TranslateFullWidthLatin: (function() {
+    var matchFwLatinRe = /[０-ｚ]/g;
+    var latinMapper = new CharMapper([0xff10, 0x0030, 74]);
+    var replaceFun = function($0) {
+      return latinMapper.MapToChar($0.charCodeAt(0));
+    };
+
+    return function(text) {
+      return text.replace(matchFwLatinRe, replaceFun);
+    };
+  })(),
+
+  ProcessHeading: (function() {
+    var matchHiraganaKatakanaRe = /[あ-ヺ]/;
+
+    return function(text) {
+      // Headings containing one character are often represent an entry
+      // describing Kanji. These entries are not very useful so we drop them.
+      if (text.length > 1) {
+        text = this._JoinKanjiParts(text);
+        text = this._StripGarbageChars(text);
+        text = this._TranslateFullWidthLatin(text);
+
+        return EscapeJsonString(text);
+      } else {
+        // Be 100% that we are skipping a Kanji entry. There're some headings
+        // containing only 1 hiragana/katakana char and we don't want to drop
+        // those.
+        if (matchHiraganaKatakanaRe.test(text)) {
+          return text;
+        } else {
+          return null;
+        }
+      }
+    };
+  })()
+};
+
+// ====================================================================
+// Hooks.
+// ====================================================================
 
 function Newline() {
   return '␊';
@@ -158,258 +656,49 @@ function Indent() {
   return '';
 }
 
-var matchHiraganaKatakana = /[あ-ヺ]/;
-function ProcessHeading(text) {
-  if (text.length > 1) {
-    return text;
-  } else {
-    if (matchHiraganaKatakana.test(text)) {
-      return text;
-    } else {
-      return null;
-    }
-  }
-}
-
 function InsertHeadingGaiji(gaijiCode) {
-  return '?';
+  var result = gaijiMap[gaijiCode];
+  return (result) ? result : '?';
 }
 
 function InsertTextGaiji(gaijiCode) {
-  // Try to look up the gaiji in the gaiji ranges map.
-  for (key in gaijiRangeMap) {
-    var result = gaijiRangeMap[key].MapToChar(gaijiCode);
+  var result;
 
-    if (result !== undefined)
+  // Try to look up the gaiji in the gaiji ranges map.
+  for (var key in articleGaijiRanges) {
+    result = articleGaijiRanges[key].MapToChar(gaijiCode);
+
+    if (result !== undefined) {
       return result;
+    }
   }
 
   // Try to look up the gaiji in the map with singular gaiji.
-  var result = gaijiMap[gaijiCode];
-
+  result = gaijiMap[gaijiCode];
   return (result) ? result : '&lt;0x' + gaijiCode.toString(16) + '&gt;';
 }
 
-var lv0Charset  = gaijiRangeMap.lv0.GetRegexpRange();
-var lv05Charset = gaijiRangeMap.lv05.GetRegexpRange();
-var lv1Charset  = gaijiRangeMap.lv1.GetRegexpRange();
-var lv2Charset  = gaijiRangeMap.lv2.GetRegexpRange();
-
-/**
- * Functions for decorating article title.
- */
-var matchTitle = /^\s*(.*?)␊\s*/;
-function DecorateTitle(text) {
-  return text.replace(matchTitle,
-                      '<div class="article-title djs-title">$1</div>');
+function BeginKeyword() {
+  // Keywords in DAIJISEN appear to depict article's title.
+  return '';
 }
 
-/**
- * Functions for modifying relative references in the article's text.
- *
- * The text representation of these references is indistinguishable from
- * the Level 1 List Item numbers. DecorateRelativeReferences() function tries
- * its best to convert these references into plain numbers so that list
- * decorators can produce good results.
- */
-var matchAnyRef = new RegExp('[' + lv0Charset + lv05Charset + lv1Charset + lv2Charset + ']');
-function DecorateInnerRelativeReferences(text) {
-  var result = [];
+function EndKeyword() {
+  return '';
+}
 
-  var left = '（［「《〈';
-  var right = '〉》」］）';
+ProcessHeading = (function() {
+  var headingProcessor = new HeadingProcessor();
 
-  var openParentheses = 0;
-  var sliceFrom = 0;
-
-  for (var i = 0; i < text.length; i++) {
-    var lindex;
-    var rindex;
-
-    if (matchAnyRef.test(text[i])) {
-      if (openParentheses > 0) {
-        result.push(text.slice(sliceFrom, i));
-        result.push('&#' + text[i].charCodeAt(0) + ';');
-      } else {
-        result.push(text.slice(sliceFrom, i + 1));
-      }
-
-      sliceFrom = i + 1;
-    } else if ((lindex = left.indexOf(text[i])) != -1) {
-      openParentheses++;
-    } else if ((rindex = right.indexOf(text[i])) != -1) {
-      if (openParentheses > 0) {
-        openParentheses--;
-      } else {
-        print('Mismatched parentheses in text at offset ' + i);
-      }
-    }
+  return function(text) {
+    return headingProcessor.ProcessHeading(text);
   }
+})();
 
-  if (sliceFrom < text.length)
-    result.push(text.slice(sliceFrom));
+ProcessText = (function() {
+  var textProcessor = new TextProcessor();
 
-  if (openParentheses > 0)
-    print('Got some unclosed parentheses in text');
-
-  return result.join('');
-}
-
-var matchRefCheckpoint = new RegExp('[' + lv0Charset + lv05Charset + lv1Charset + ']', 'g');
-function DecorateRelativeReferences(text) {
-  text = DecorateInnerRelativeReferences(text);
-
-  var lv0mapper = gaijiRangeMap.lv0;
-  var lv05mapper = gaijiRangeMap.lv05;
-  var lv1mapper = gaijiRangeMap.lv1;
-
-  var lastListNumber = null;
-  var lastLv0Number = null;
-  var lastLv05Number = null;
-
-  return text.replace(matchRefCheckpoint, function($0) {
-    var lv0Number;
-    var lv05Number;
-    var lv1Number;
-
-    if ((lv1Number = lv1mapper.GetDstCharDelta($0)) !== undefined) {
-      // Got a list item number from List 1.
-      lv1Number++;
-
-      if ((lastListNumber == null && lv1Number == 1)
-          || lv1Number == lastListNumber + 1) {
-        //print('item on ' + $0);
-        lastListNumber = lv1Number;
-        return $0;
-      } else {
-        return '&#' + $0.charCodeAt(0) + ';';
-      }
-    } else if ((lv0Number = lv0mapper.GetDstCharDelta($0)) !== undefined) {
-      // Got a list item number from List 0.
-      lv0Number++;
-
-      if (lastLv0Number == null || lv0Number > lastLv0Number) {
-        //print('item on ' + $0);
-        lastListNumber = null;
-        lastLv0Number = lv0Number;
-        return $0;
-      } else {
-        return '&#' + $0.charCodeAt(0) + ';';
-      }
-    } else if ((lv05Number = lv05mapper.GetDstCharDelta($0)) !== undefined) {
-      // Got a list item number from List 0.5.
-      lv05Number++;
-
-      if (lastLv05Number == null || lv05Number > lastLv05Number) {
-        lastListNumber = null;
-        lastLv05Number = lv05Number;
-        return $0;
-      } else {
-        return '&#' + $0.charCodeAt(0) + ';';
-      }
-    } else {
-      // WTF
-      print('BUG: Invalid regexp or bug in mapper. Match: ' + $0);
-      return $0;
-    }
-  })
-}
-
-function EscapeRelativeReferences(text) {
-  return text.replace(matchAnyRef, function($0) {
-    return '&#' + $0.charCodeAt(0) + ';';
-  });
-}
-
-/**
- * Functions for decorating Level 0 List Items.
- */
-var matchLv0NumericItem = new RegExp('[' + lv0Charset + '][^␊◆' + lv0Charset + gaijiRangeMap.lv1.GetDstCharWithIndex(0) + ']*', 'g');
-var matchLv05NumericItem = new RegExp('[' + lv05Charset + '][^␊◆' + lv05Charset + gaijiRangeMap.lv1.GetDstCharWithIndex(0) + ']*', 'g');
-var matchLv0SingularItem = new RegExp('(^.*?␊)(.*?)([' + gaijiRangeMap.lv1.GetDstCharWithIndex(0) + '])');
-function DecorateLv0Items(text) {
-
-  text = text.replace(matchLv05NumericItem, function($0) {
-    return '␊<div class="djs-section">' + $0 + '</div>';
-  });
-
-  var hasMatches = false;
-
-  // Try the numbered Level 0 List items.
-  text = text.replace(matchLv0NumericItem, function($0) {
-    hasMatches = true;
-    return '␊<div class="djs-section">' + $0 + '</div>';
-  });
-
-  // Finish if we have found numbered list items. None of other section formats
-  // are possible in the text anymore.
-  if (hasMatches)
-    return text;
-
-  // Try to find one and only one unnumbered item. Daijisen doesn't number
-  // sections if there is only one section.
-  text = text.replace(matchLv0SingularItem, function($0, $1, $2, $3) {
-    hasMatches = true;
-    return $1 + '<div class="djs-section">' + $2 + '</div>' + $3;
-  });
-
-  return text;
-}
-
-/**
- * Functions for decorating Level 2 List Items.
- */
-var matchLv2Item = new RegExp('([' + lv2Charset + '])([^' + lv2Charset +']+)', 'g');
-function ReplaceLv2ItemText($0, $1, $2) {
-  return '<div class="djs-lv2-item"><span class="djs-lv2-number">' + $1 +
-    '</span><span class="djs-lv2-text">' + $2 + '</span></div>';
-}
-
-function DecorateLv2Items(lv1ItemText) {
-  return lv1ItemText.replace(matchLv2Item, ReplaceLv2ItemText);
-}
-
-/**
- * Functions for decorating list items (0, 1, 2).
- */
-var matchLv1Item = new RegExp('([' + lv1Charset + '])([^␊◆' + lv1Charset + lv0Charset + ']+)', 'g');
-function DecorateListItems(text) {
-  var lv1mapper = gaijiRangeMap.lv1;
-  text = DecorateLv0Items(text);
-  return text.replace(matchLv1Item, function($0, $1, $2) {
-    return '<div class="djs-lv1-item"><span class="djs-lv1-number">' +
-      (lv1mapper.GetDstCharDelta($1) + 1) +
-      '</span><span class="djs-lv1-text">' + DecorateLv2Items($2) +
-      '</span></div>';
-  });
-}
-
-/**
- * Functions for decorating special sections.
- */
-var matchSpecialSection = new RegExp('␊［(下接句|下接語|可能|類語|用法|派生|形動)］([^◆␊' + lv0Charset + lv05Charset + ']*)', 'g');
-var matchRuigoSection = new RegExp('◆([^␊◆' + lv0Charset + lv05Charset + ']*)', 'g');
-function DecorateSpecialSections(text) {
-  text = text.replace(matchSpecialSection, function($0, $1, $2) {
-    return '␊<div class="djs-spec"><span class="djs-spec-type"><p>' + $1 +
-      '</p></span><span class="djs-spec-text">' +
-      EscapeRelativeReferences($2) + '</span></div>';
-  });
-  text = text.replace(matchRuigoSection, function($0, $1) {
-    return '␊<div class="djs-spec"><span class="djs-spec-type"><p>補説</p>' +
-      '</span><span class="djs-spec-text">' + EscapeRelativeReferences($1) +
-      '</span></div>';
-  });
-  return text;
-}
-
-var matchGarbageChars = /␊/g;
-function ProcessText(text) {
-  text = DecorateRelativeReferences(text);
-  text = DecorateSpecialSections(text);
-  text = DecorateListItems(text);
-  text = DecorateTitle(text);
-  text = text.replace(matchGarbageChars, '');
-
-  return text;
-}
+  return function(text) {
+    return textProcessor.ProcessText(text);
+  }
+})();
