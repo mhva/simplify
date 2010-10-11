@@ -110,117 +110,116 @@ void SearchAction::SearchDict(simplify::Repository &repository,
     }
 
     simplify::Dictionary::SearchResults *results = likely_results;
+
+    // 4K is ought to be enough for a search result name or GUID.
+    // Anything near or beyond that size is just crazy anyway.
+    char data_buffer[4 * 1024];
+    char text_buffer[4 * 1024];
     size_t accepted_results_count = 0;
 
-    if (results->GetCount() > 0) {
-        // 4K is ought to be enough for a search result name or GUID.
-        // Anything near or beyond that size is just crazy anyway.
-        char data_buffer[4 * 1024];
-        char text_buffer[4 * 1024];
+    while (results->SeekNext()) {
+        // Integer containing an offset in the body where the current
+        // result starts. We use the value of this variable to erase
+        // result's text in if case anything goes wrong to avoid producing
+        // malformed JSON.
+        size_t result_start = body.length();
 
-        do {
-            // Integer containing an offset in the body where the current
-            // result starts. We use the value of this variable to erase
-            // result's text in if case anything goes wrong to avoid producing
-            // malformed JSON.
-            size_t result_start = body.length();
+        simplify::Likely<size_t> likely_length =
+            results->FetchGuid(text_buffer, sizeof(text_buffer));
 
-            simplify::Likely<size_t> likely_length =
-                results->FetchGuid(text_buffer, sizeof(text_buffer));
+        if (likely_length) {
+            body.append("[\"")
+                .append(text_buffer, likely_length)
+                .append("\",");
+        } else {
+            std::cout << "An error occurred while retrieving article GUID "
+                      << "from " << dict.GetName() << ": "
+                      << likely_length.error_code().message() << std::endl;
+            body.erase(result_start);
+            continue;
+        }
 
-            if (likely_length) {
-                body.append("[\"")
-                    .append(text_buffer, likely_length)
-                    .append("\",");
-            } else {
-                std::cout << "An error occurred while retrieving article GUID "
+        size_t data_length;
+        likely_length =
+            results->InitializeHeadingData(data_buffer,
+                                           sizeof(data_buffer));
+
+        if (likely_length) {
+          data_length = likely_length;
+        } else {
+            std::cout << "An error occurred while initializing heading "
+                      << "data for a search result with article GUID "
+                      << text_buffer << " from " << dict.GetName() << ": "
+                      << likely_length.error_code().message() << std::endl;
+            body.erase(result_start);
+            continue;
+        }
+
+        likely_length =
+            results->FetchHeading(data_buffer,
+                                  data_length,
+                                  text_buffer,
+                                  sizeof(text_buffer));
+        if (likely_length) {
+            body.append("\"")
+                .append(text_buffer, likely_length)
+                .append("\",");
+        } else {
+            std::error_code &e = likely_length.error_code();
+
+            // Do not log things if the dictionary returned an unexpected
+            // result type error. Actually, this is quite legitimate
+            // behavior, user scripts may use this trick to skip unwanted
+            // search results. It also should be noted, that this behavior
+            // is only acceptable for scripts executed by the FetchHeading
+            // method, for any other method this is an error.
+            if (e != simplify::simplify_error::unexpected_result_type) {
+                std::cout << "An error occurred while retrieving heading "
+                          << "for a search result with GUID " << text_buffer
                           << "from " << dict.GetName() << ": "
-                          << likely_length.error_code().message() << std::endl;
-                body.erase(result_start);
-                continue;
+                          << likely_length.error_code().message()
+                          << std::endl;
             }
 
-            size_t data_length;
-            likely_length =
-                results->InitializeHeadingData(data_buffer,
-                                               sizeof(data_buffer));
+            body.erase(result_start);
+            continue;
+        }
 
-            if (likely_length) {
-              data_length = likely_length;
-            } else {
-                std::cout << "An error occurred while initializing heading "
-                          << "data for a search result with article GUID "
-                          << text_buffer << " from " << dict.GetName() << ": "
-                          << likely_length.error_code().message() << std::endl;
-                body.erase(result_start);
-                continue;
-            }
-
-            likely_length =
-                results->FetchHeading(data_buffer,
-                                      data_length,
-                                      text_buffer,
-                                      sizeof(text_buffer));
-            if (likely_length) {
+        likely_length =
+            results->FetchTags(data_buffer,
+                               data_length,
+                               text_buffer,
+                               sizeof(text_buffer));
+        if (likely_length) {
+            // Only append tags if the string is not empty.
+            if (likely_length > 0) {
                 body.append("\"")
                     .append(text_buffer, likely_length)
                     .append("\",");
-            } else {
-                std::error_code &e = likely_length.error_code();
-
-                // Do not log things if the dictionary returned an unexpected
-                // result type error. Actually, this is quite legitimate
-                // behavior, user scripts may use this trick to skip unwanted
-                // search results. It also should be noted, that this behavior
-                // is only acceptable for scripts executed by the FetchHeading
-                // method, for any other method this is an error.
-                if (e != simplify::simplify_error::unexpected_result_type) {
-                    std::cout << "An error occurred while retrieving heading "
-                              << "for a search result with GUID " << text_buffer
-                              << "from " << dict.GetName() << ": "
-                              << likely_length.error_code().message()
-                              << std::endl;
-                }
-
-                body.erase(result_start);
-                continue;
             }
+        } else {
+            std::cout << "An error occurred while retrieving tags for a "
+                      << "search entry with GUID " << text_buffer
+                      << " from " << dict.GetName() << ": "
+                      << likely_length.error_code().message() << std::endl;
+            body.erase(result_start);
+        }
 
-            likely_length =
-                results->FetchTags(data_buffer,
-                                   data_length,
-                                   text_buffer,
-                                   sizeof(text_buffer));
-            if (likely_length) {
-                // Only append tags if the string is not empty.
-                if (likely_length > 0) {
-                    body.append("\"")
-                        .append(text_buffer, likely_length)
-                        .append("\",");
-                }
-            } else {
-                std::cout << "An error occurred while retrieving tags for a "
-                          << "search entry with GUID " << text_buffer
-                          << " from " << dict.GetName() << ": "
-                          << likely_length.error_code().message() << std::endl;
-                body.erase(result_start);
-            }
+        // Erase last comma.
+        body.erase(body.size() - 1);
+        body.append("],");
 
-            // Erase last comma.
-            body.erase(body.size() - 1);
-            body.append("],");
-
-            ++accepted_results_count;
-        } while (results->SeekNext());
+        ++accepted_results_count;
     }
 
-    // Erase last comma iff we have at least one result. There would be no
+    delete results;
+
+    // Erase last comma if we have at least one result. There will be no
     // comma if there are no results.
     if (accepted_results_count > 0)
         body.erase(body.size() - 1);
 
     body.append("]}");
-    delete results;
 }
 
 void SearchAction::SearchAll(simplify::Repository &repository,
