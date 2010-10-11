@@ -618,6 +618,58 @@ HeadingProcessor.prototype = {
     };
   })(),
 
+  /**
+   * Permutes a word.
+   *
+   * Example: Word like '掛（け）' will result in 2 permutations:
+   *    掛, 掛け
+   */
+  _PermuteWord: (function() {
+    var matchBracketsRe = /（(.*?)）/g;
+    var Permute = function(variants, index, appendTo, out) {
+      if (index < variants.length) {
+        for (var i = 0; i < variants[index].length; i++) {
+          Permute(variants, index + 1, appendTo + variants[index][i], out);
+        }
+      } else {
+        out.push(appendTo);
+      }
+    };
+
+    return function(text, out) {
+      var matches;
+      var sliceFrom = 0;
+      var variants = [];
+
+      // Put each possible chunk mutation into list and push this list into
+      // @variants so, later, we can make all possible permutations.
+      while ((matches = matchBracketsRe.exec(text)) !== null) {
+        var chunk = text.slice(sliceFrom, matches.index);
+
+        variants.push([chunk, chunk + matches[1]])
+        sliceFrom = matchBracketsRe.lastIndex;
+      }
+
+      if (variants.length == 0) {
+        out.push(text);
+      } else {
+        if (sliceFrom < text.length) {
+          variants.push([text.slice(sliceFrom)]);
+        }
+
+        Permute(variants, 0, '', out);
+      }
+    }
+  })(),
+
+  _StripChunksEnclosedInParentheses: (function() {
+    var matchParenthesesRe = /（.*?）/g;
+
+    return function(text) {
+      return text.replace(matchParenthesesRe, '');
+    }
+  })(),
+
   ProcessHeading: (function() {
     var matchHiraganaKatakanaRe = /[あ-ヺ]/;
 
@@ -627,12 +679,12 @@ HeadingProcessor.prototype = {
       if (heading.length > 1) {
         heading = this._JoinKanjiParts(heading);
         heading = this._StripGarbageChars(heading);
-        heading = this._TranslateFullWidthLatin(heading);
 
         // HACK: Save the result so the ProcessTags can later pick it up and
         // avoid burning unneccessary CPU cycles.
         this.processedHeading = heading;
 
+        heading = this._TranslateFullWidthLatin(heading);
         return EscapeJsonString(heading);
       } else {
         // Be 100% that we are skipping a Kanji entry. There're some headings
@@ -650,25 +702,49 @@ HeadingProcessor.prototype = {
   })(),
 
   ProcessTags: function(heading) {
-    var tagSource;
+    var templSource;
 
     if (this.processedHeading !== undefined) {
-      tagSource = this.processedHeading;
+      templSource = this.processedHeading;
       this.processedHeading = undefined;
     } else {
-      tagSource = this.ProcessHeading();
+      // TODO: Might be a good idea to make ProcessHeading() to look for cached
+      // result.
+      print('Entering a slow processing path in ProcessTags function. Please ' +
+            'consider calling Dictionary::SearchResults::FetchHeading() ' +
+            'before calling Dictionary::SearchResults::FetchTags().');
+      templSource = this.ProcessHeading();
     }
 
-    if (tagSource !== null && tagSource[tagSource.length - 1] == '】') {
-      var left = tagSource.indexOf('【');
+    if (templSource !== null) {
+      var left;
 
-      if (left != -1) {
-        var tags = tagSource.slice(left + 1, tagSource.length - 1).split('・');
-        tags.push(tagSource.slice(0, left));
+      // If we have some templates- permute them and produce tags.
+      if (templSource[templSource.length - 1] == '】' &&
+          (left = templSource.indexOf('【')) != -1) {
+        var tags = [];
+        var templates =
+          templSource.slice(left + 1, templSource.length - 1).split('・');
+
+        // Permute each tag template. A tag template might contain a part that
+        // can be optionally removed or inserted (a text inclosed into（）).
+        // We should permute each template and produce real tags.
+        for (var i = 0; i < templates.length; i++) {
+          this._PermuteWord(templates[i], tags);
+        }
+
+        // XXX: Push the reading into tags as well. Might be useful,
+        // but I'm not sure.
+        tags.push(templSource.slice(0, left));
 
         return EscapeJsonString(tags.join(','));
       } else {
-        return '';
+        // The heading contains only a reading, so we make this reading a tag.
+
+        // Some readings might contain Kanji with their readings enclosed in
+        // full width parentheses (WTF, this is a reading for God's sake).
+        // We should strip these readings to produce valid tags.
+        return this._StripChunksEnclosedInParentheses(heading);
       }
     } else {
       return '';
