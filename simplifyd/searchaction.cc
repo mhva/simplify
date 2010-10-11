@@ -140,11 +140,14 @@ void SearchAction::SearchDict(simplify::Repository &repository,
                 continue;
             }
 
+            size_t data_length;
             likely_length =
                 results->InitializeHeadingData(data_buffer,
                                                sizeof(data_buffer));
 
-            if (!likely_length) {
+            if (likely_length) {
+              data_length = likely_length;
+            } else {
                 std::cout << "An error occurred while initializing heading "
                           << "data for a search result with article GUID "
                           << text_buffer << " from " << dict.GetName() << ": "
@@ -155,7 +158,7 @@ void SearchAction::SearchDict(simplify::Repository &repository,
 
             likely_length =
                 results->FetchHeading(data_buffer,
-                                      likely_length,
+                                      data_length,
                                       text_buffer,
                                       sizeof(text_buffer));
             if (likely_length) {
@@ -185,7 +188,7 @@ void SearchAction::SearchDict(simplify::Repository &repository,
 
             likely_length =
                 results->FetchTags(data_buffer,
-                                   likely_length,
+                                   data_length,
                                    text_buffer,
                                    sizeof(text_buffer));
             if (likely_length) {
