@@ -283,6 +283,7 @@ SearchAction.prototype = {
         // TODO: Load a lucky result for other dictionaries.
         var ctx = tabWidget.getPanes().eq(tabIndex).data('PaneContext');
         fetchArticleHelper(ctx, params.guid, 0);
+        tabWidget.click(tabIndex);
         break;
       case 'search':
         tabWidget.getPanes().each(function(index) {
