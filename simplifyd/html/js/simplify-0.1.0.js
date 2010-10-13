@@ -143,10 +143,11 @@ SearchAgent.prototype = {
       return;
     }
 
-    if (!('error' in response)) {
+    var error = response[ctx.name].error;
+    if (error === undefined) {
       onSuccess(new ResultsContainer(ctx, response));
     } else {
-      onFailure(response.error);
+      onFailure(error);
     }
   },
 
