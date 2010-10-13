@@ -28,7 +28,6 @@ function MakePrototype() {
 }
 
 function ArticleAgent(context) {
-  this._context = context;
   this._lastFetchId = null;
 }
 
@@ -45,37 +44,26 @@ ArticleAgent.prototype = {
     }
   },
 
-  fetchArticle: function(guid, onSuccess, onFailure) {
+  fetchArticle: function(context, guid, onSuccess, onFailure) {
     var self = this;
-    this._lastFetchId = Math.random();
+    var fetchId = this._lastFetchId = Math.random();
 
     $.ajax({
-      url: 'article?id=' + this._context.id + '&guid=' +
-        encodeURIComponent(guid),
-      success: function(response) {
-        self._handleAjaxSuccess.call(self,
-                                     self._lastFetchId,
-                                     onSuccess,
-                                     onFailure,
-                                     response);
+      url: 'article?id=' + context.id + '&guid=' + encodeURIComponent(guid),
+      success: function(re) {
+        self._handleAjaxSuccess(fetchId, onSuccess, onFailure, re);
       },
-      error: function(xhr, textStatus, error) {
-        self._handleAjaxFailure.call(self,
-                                     self._lastFetchId,
-                                     onFailure,
-                                     xhr,
-                                     textStatus,
-                                     error);
+      error: function(xhr, ts, e) {
+        self._handleAjaxFailure(fetchId, onFailure, xhr, ts, e);
       },
       cache: true
     });
   }
 };
 
-function ResultsContainer(dictContext, responseContext) {
-  this._context = dictContext;
-  this._responseContext = responseContext;
-  this._resultSet = responseContext.results;
+function ResultsContainer(context, response) {
+  this._context = context;
+  this._resultSet = response[context.name].results;
   this._offset = -1;
 }
 
@@ -103,7 +91,6 @@ ResultsContainer.prototype = {
 
       var tags = tagString.split(',');
       for (var t = 0; t < tags.length; t++) {
-        console.log(tags[t] + ' == ' + text + '?');
         if (tags[t] === text) {
           this._offset = i;
           return true;
@@ -112,6 +99,10 @@ ResultsContainer.prototype = {
     }
 
     return false;
+  },
+
+  getResultCount: function() {
+    return this._resultSet.length;
   },
 
   getArticleGuid: function() {
@@ -142,20 +133,18 @@ ResultsContainer.prototype = {
   }
 };
 
-function SearchAgent(context) {
-  this._context = context;
+function SearchAgent() {
   this._lastSearchId = null;
 }
 
 SearchAgent.prototype = {
-  _handleAjaxSuccess: function(searchId, response, onSuccess, onFailure) {
+  _handleAjaxSuccess: function(ctx, searchId, response, onSuccess, onFailure) {
     if (searchId != this._lastSearchId) {
       return;
     }
 
     if (!('error' in response)) {
-      onSuccess(
-        new ResultsContainer(this._context, response[this._context.name]));
+      onSuccess(new ResultsContainer(ctx, response));
     } else {
       onFailure(response.error);
     }
@@ -169,48 +158,78 @@ SearchAgent.prototype = {
     onFailure(error.toString());
   },
 
-  search: function(query, onSuccess, onFailure) {
+  search: function(context, query, onSuccess, onFailure) {
     var self = this;
-    this._lastSearchId = Math.random();
+    var searchId = this._lastSearchId = Math.random();
 
     $.ajax({
-      url: 'search?id=' + this._context.id + '&q=' + encodeURIComponent(query),
-      success: function(response) {
-        self._handleAjaxSuccess.call(self,
-                                     self._lastSearchId,
-                                     response,
-                                     onSuccess,
-                                     onFailure);
+      url: 'search?id=' + context.id + '&q=' + encodeURIComponent(query),
+      success: function(re) {
+        self._handleAjaxSuccess(context, searchId, re, onSuccess, onFailure);
       },
-      error: function(xhr, textStatus, error) {
-        self._handleAjaxFailure.call(self,
-                                     self._lastSearchId,
-                                     onFailure,
-                                     xhr,
-                                     textStatus,
-                                     error);
+      error: function(xhr, ts, e) {
+        self._handleAjaxFailure(searchId, onFailure, xhr, ts, e);
       },
       cache: true
     });
   }
 };
 
-// jQuery plugin that provides a quick way to make a text field
-// to do an AJAX feedback every time user types text.
-//
-// This plugin is used by simplify to implement instant search.
-//
-// Usage:
-//  $('#text-input').instantSearch('api/search?q=',
-//                                 function() { console.log('success'); },
-//                                 function() { console.log('failure'); });
+function MagicArticleAgent() {
+  this._searchAgent = new SearchAgent();
+  this._articleAgent = new ArticleAgent();
+}
+
+MagicArticleAgent.prototype = {
+  _loadArticle: function(ctx, kw, results, onSuccess, onFailure) {
+    if (results.seekMagic(kw)) {
+      this._articleAgent.fetchArticle(
+        ctx,
+        results.getArticleGuid(),
+        function(text) {
+          onSuccess({
+            results: results,
+            text   : text
+          });
+        },
+        function() {
+          onSuccess({results: results});
+        }
+      );
+    } else {
+      onSuccess({results: results});
+    }
+  },
+
+  getArticleAgent: function() {
+    return this._articleAgent;
+  },
+
+  getSearchAgent: function() {
+    return this._searchAgent;
+  },
+
+  fetchArticle: function(context, keyword, onSuccess, onFailure) {
+    var self = this;
+
+    this._searchAgent.search(
+      context,
+      keyword,
+      function(results) {
+        self._loadArticle(context, keyword, results, onSuccess, onFailure);
+      },
+      onFailure
+    );
+  }
+};
+
 (function($) {
   var self       = null;
   var eventTimer = null;
   var staleTicks = 0;
   var lastText   = '';
 
-  var tryEmitEvent = function(force) {
+  function tryEmitEvent(force) {
     var text = $(self).val();
     if (text != lastText || force) {
       // Reset the stale period to indicate that the user is still
@@ -230,7 +249,7 @@ SearchAgent.prototype = {
     }
   };
 
-  $.fn.doTextChangedFeedback = function() {
+  $.fn.startInstantFeedback = function() {
     self = this;
 
     $(this).bind('keydown', function(event) {
@@ -244,6 +263,16 @@ SearchAgent.prototype = {
         eventTimer = setInterval(tryEmitEvent, 200);
       }
     });
+  };
+
+  $.fn.setText = function(text, silent) {
+    $(this).val(text);
+
+    if (silent) {
+      lastText = text;
+    } else {
+      tryEmitEvent();
+    }
   };
 })(jQuery);
 
@@ -302,5 +331,364 @@ var SignalUserPrototype = {
         listenerList[i].apply(this, argv);
       }
     }
+  }
+};
+
+function ArticleWidget(parent, conf) {
+  this.__init__(parent, conf);
+}
+
+ArticleWidget.prototype = {
+  __init__: function(parent, conf) {
+    this.__proto__.__proto__.__init__.call(this);
+    this._discardLookup = false;
+    this._containerDom =
+      $('<div class="' + (conf.containerClass || 'article') + '"></div>');
+    $(parent).append(this._containerDom);
+
+    $(this._containerDom).bind('mouseup', {self:this}, this._handleMouseUp);
+    $(window).bind('keydown', {self:this}, this._handleKeyDown);
+    $(window).bind('keyup', {self:this}, this._handleKeyUp);
+  },
+
+  _handleKeyDown: function(event) {
+    if (event.keyCode == 17 || event.keyCode == 91) {
+      event.data.self._discardLookup = true;
+    }
+  },
+
+  _handleKeyUp: function(event) {
+    if (event.keyCode == 17 || event.keyCode == 91) {
+      event.data.self._discardLookup = false;
+    }
+  },
+
+  _handleMouseUp: function(event) {
+    var self = event.data.self;
+    var text = document.getSelection().toString();
+
+    if (text.length > 0 && !self._discardLookup) {
+      self.trigger('inlineLookup', [text]);
+    }
+  },
+
+  renderLoadingPage: function() {
+    $(this._containerDom).html('');
+  },
+
+  renderArticle: function(text) {
+    $(this._containerDom).html(text);
+  },
+
+  show: function() {
+    $(this._containerDom).show();
+  },
+
+  hide: function() {
+    $(this._containerDom).hide();
+  },
+
+  visible: function() {
+    return $(this._containerDom).is(':visible');
+  }
+}; MergePrototype(ArticleWidget.prototype, SignalUserPrototype);
+
+function SearchResultsWidget(parent, conf) {
+  this.__init__(parent, conf);
+}
+
+SearchResultsWidget.prototype = {
+  __init__: function(parent, conf) {
+    this.__proto__.__proto__.__init__.call(this);
+    this._containerDom =
+      $('<div class="' + (conf.containerClass || 'results') + '"></div>');
+
+    $(parent).append(this._containerDom);
+    $(this._containerDom).bind('click', {self:this}, this._handleClick);
+  },
+
+  _handleClick: function(event) {
+    var self = event.data.self;
+
+    if ($(event.target).hasClass('result')) {
+      event.preventDefault();
+      self.trigger('openArticle', [$(event.target).attr('href')]);
+    }
+  },
+
+  renderLoadingPage: function() {
+    // TODO: Add 'Loading ...' page.
+    $(this._containerDom).html('');
+  },
+
+  renderNoQueryPage: function() {
+    // TODO: Add 'Empty query' page.
+    $(this._containerDom).html('');
+  },
+
+  renderResultsPage: function(results) {
+    results.seekFirst();
+
+    var stringList = [];
+    if (results.getResultCount() > 0) {
+      stringList.push('<h3 class="result-count">Found ');
+      stringList.push(results.getResultCount().toString());
+      stringList.push(results.getResultCount() == 1 ? ' match' : ' matches');
+      stringList.push('</h3>');
+
+      while (results.seekNext()) {
+        stringList.push('<a class="result" href="');
+        stringList.push(results.getArticleGuid());
+        stringList.push('">');
+        stringList.push(results.getArticleHeading());
+        stringList.push('</a>');
+      }
+    } else {
+      stringList.push('<span class="result-count">No matches found</span>');
+    }
+
+    $(this._containerDom).html(stringList.join(''));
+  },
+
+  show: function() {
+    $(this._containerDom).show();
+  },
+
+  hide: function() {
+    $(this._containerDom).hide();
+  },
+
+  visible: function() {
+    return $(this._containerDom).is(':visible');
+  }
+}; MergePrototype(SearchResultsWidget.prototype, SignalUserPrototype);
+
+function OverlayArticleWidget(parent, conf) {
+  // Dynamically create and append widget's DOM to parent's DOM.
+  this._overlayDom = $(
+    '<div class="' + (conf.overlayClass || 'overlay') + '"> \
+       <div class="overlay-content"></div> \
+       <div class="overlay-menu"> \
+         <a href="" class="overlay-back-btn"></a> \
+         <a href="" class="overlay-fwd-btn"></a> \
+         <div class="overlay-tabs"> \
+           <a href="" class="overlay-article-btn">Article</a> \
+           <a href="" class="overlay-results-btn">Search</a> \
+         </div> \
+       </div> \
+     </div>'
+  );
+  $(parent).append(this._overlayDom);
+
+  // Create Article/Search tab panes.
+  this._articleWidget =
+    new ArticleWidget($('.overlay-content', this._overlayDom), {
+      containerClass: 'overlay-article'
+    });
+  this._searchWidget =
+    new SearchResultsWidget($('.overlay-content', this._overlayDom), {
+      containerClass: 'overlay-results'
+    });
+
+  var self = this;
+  // Bind handler that will open an article when user clicks on a search result.
+  this._searchWidget.bind('openArticle', function(guid) {
+    self._handleOpenArticleEvent(guid);
+  });
+
+  // Bind handler that will will load an article in response to inline lookup
+  // request.
+  this._articleWidget.bind('inlineLookup', function(text) {
+    self._handleInlineLookupEvent(text);
+  });
+
+  // Bind back/forward button handlers.
+  $('.overlay-back-btn', this._overlayDom).bind('click', function(event) {
+    self._handleBackBtnClick(event);
+  });
+  $('.overlay-fwd-btn', this._overlayDom).bind('click', function(event) {
+    self._handleFwdBtnClick(event);
+  });
+
+  // Initialize overlay.
+  $(this._overlayDom).overlay();
+
+  // Initialize tab widget.
+  $('.overlay-tabs', this._overlayDom).tabs(
+    $('.overlay-content > div', this._overlayDom), {
+      effect: 'fade',
+      initialIndex: null
+    }
+  );
+
+  this._overlay = $(this._overlayDom).data('overlay');
+  this._tabs = $('.overlay-tabs', this._overlayDom).data('tabs');
+  this._constraintElement = conf.constraintElement || window;
+  this._magicAgent = new MagicArticleAgent();
+
+  this._history = [];
+  this._current = 0;
+}
+
+OverlayArticleWidget.prototype = {
+  _handleInlineLookupEvent: function(text) {
+    this._load(this._history[this._current].dictContext, text, true);
+  },
+
+  _handleBackBtnClick: function(event) {
+    event.preventDefault();
+    this._select(this._current - 1);
+  },
+
+  _handleFwdBtnClick: function(event) {
+    event.preventDefault();
+    this._select(this._current + 1);
+  },
+
+  _handleOpenArticleEvent: function(guid) {
+    var self = this;
+    var current = this._current;
+    var activeItem = this._history[current];
+    var context = activeItem.dictContext;
+
+    this._articleWidget.renderLoadingPage();
+    this._magicAgent.getArticleAgent().fetchArticle(
+      context,
+      guid,
+      function(text) {
+        activeItem.articleText = text;
+
+        // Do not render article if user navigated away from the current
+        // history item.
+        if (current == self._current) {
+          self._articleWidget.renderArticle(text);
+          self._switchToArticle();
+        }
+      },
+      function(details) {
+        console.error('OverlayArticleWidget: fetchArticle: GUID=' + guid);
+      }
+    );
+  },
+
+  _adjustGeometry: function() {
+    var containerWidth = $(this._constraintElement).outerWidth();
+    var containerHeight = $(this._constraintElement).outerHeight();
+    var containerOffset = $(this._constraintElement).offset();
+
+    $(this._overlayDom).width(containerWidth - 90);
+    $(this._overlayDom).height(containerHeight - 60);
+    this._overlay.getConf().top = containerOffset.top +
+      (containerHeight - $(this._overlayDom).outerHeight()) / 2;
+    this._overlay.getConf().left = containerOffset.left +
+      (containerWidth - $(this._overlayDom).outerWidth()) / 2;
+  },
+
+  _renderOverlay: function() {
+    if (this._overlay.isOpened()) {
+      return;
+    }
+
+    this._adjustGeometry();
+
+    var self = this;
+    $(this._overlayDom).expose({
+      loadSpeed: 400,
+      color: 'rgba(0,0,0,.4)',
+      onBeforeLoad: function() {
+        self._overlay.load();
+      },
+      onBeforeClose: function() {
+        self._overlay.close();
+      }
+    });
+  },
+
+  _processResults: function(dictContext, resultObject) {
+    if (resultObject.results.getResultCount() == 0) {
+      return;
+    }
+
+    var item = {
+      dictContext  : dictContext,
+      searchResults: resultObject.results,
+      articleText  : resultObject.text
+    };
+
+    this._history.splice(this._current + 1);
+    this._history.push(item);
+    this._select(this._history.length - 1);
+  },
+
+  _switchToArticle: function() {
+    this._tabs.click(
+      $('.overlay-tabs > .overlay-article-btn', this._overlayDom).index());
+  },
+
+  _switchToResults: function() {
+    this._tabs.click(
+      $('.overlay-tabs > .overlay-results-btn', this._overlayDom).index());
+  },
+
+  _select: function(index) {
+    var activeItem = this._history[index];
+
+    if (activeItem !== undefined) {
+      this._current = index;
+    } else {
+      return;
+    }
+
+    var searchResults = activeItem.searchResults;
+    var articleText = activeItem.articleText;
+
+    if (articleText !== undefined && searchResults !== undefined) {
+      this._articleWidget.renderArticle(articleText);
+      this._searchWidget.renderResultsPage(searchResults);
+      this._switchToArticle();
+    } else {
+      this._searchWidget.renderResultsPage(searchResults);
+      this._switchToResults();
+    }
+
+    if (index + 1 < this._history.length) {
+      $('.overlay-fwd-btn', this._overlayDom).removeClass('inactive-pixmap');
+    } else {
+      $('.overlay-fwd-btn', this._overlayDom).addClass('inactive-pixmap');
+    }
+
+    if (index - 1 >= 0) {
+      $('.overlay-back-btn', this._overlayDom).removeClass('inactive-pixmap');
+    } else {
+      $('.overlay-back-btn', this._overlayDom).addClass('inactive-pixmap');
+    }
+
+    $('.overlay-results-btn', this._overlayDom).html(
+      'Search <span class="result-count">(' + activeItem.searchResults.getResultCount() + ')</span>');
+
+    this._renderOverlay();
+  },
+
+  _load: function(context, query, preserveHistory) {
+    var self = this;
+
+    if (!preserveHistory) {
+      this._history = [];
+    }
+
+    this._magicAgent.fetchArticle(
+      context,
+      query,
+      function(resultObject) {
+        self._processResults(context, resultObject);
+      },
+      function() {
+        console.error('OverlayArticleWidget fetch failed');
+      }
+    );
+  },
+
+  show: function(context, query) {
+    this._load(context, query, false);
   }
 };
