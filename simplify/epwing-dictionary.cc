@@ -144,7 +144,7 @@ enum class JsFunction : size_t {
     EndDecoration       = 15,
     InsertTextGaiji     = 16,
     ProcessHeading      = 17,
-    ProcessShortHeading = 18,
+    ProcessTags         = 18,
     ProcessText         = 19,
     InsertHeadingGaiji  = 20
 };
@@ -168,7 +168,7 @@ static const char *g_js_function_names[] = {
     /* JsFunction:15 */ "EndDecoration",
     /* JsFunction:16 */ "InsertTextGaiji",
     /* JsFunction:17 */ "ProcessHeading",
-    /* JsFunction:18 */ "ProcessShortHeading",
+    /* JsFunction:18 */ "ProcessTags",
     /* JsFunction:19 */ "ProcessText",
     /* JsFunction:20 */ "InsertHeadingGaiji"
 };
@@ -379,7 +379,7 @@ static v8::Handle<v8::Value> Print(const v8::Arguments &args)
 
     for (size_t i = 0; i < (size_t)args.Length(); i++) {
         v8::String::Utf8Value str(args[i]);
-        std::cout << *str;
+        std::cout << *str << " ";
     }
 
     std::cout << std::endl;
@@ -435,9 +435,7 @@ public:
 
     Private(EpwingDictionary *parent)
         : q(parent),
-          have_previous_search_(false),
-          hit_cache_offset(0),
-          hit_cache_length(0) {
+          last_sought_text_({-1, -1}) {
 
         eb_initialize_book(&book_);
         eb_initialize_hookset(&head_hookset_);
@@ -452,7 +450,7 @@ public:
         eb_code = eb_set_hooks(&text_hookset_, g_text_hooks);
         assert(eb_code == EB_SUCCESS);
 
-        v8::Locker v8lock;
+        v8::Locker lock;
         v8::HandleScope handle_scope;
         v8::Handle<v8::ObjectTemplate> global = v8::ObjectTemplate::New();
 
@@ -517,7 +515,6 @@ public:
         using namespace v8;
 
         Locker v8_lock;
-        TryCatch try_catch;
         HandleScope handle_scope;
         Context::Scope context_scope(js_context_);
         Handle<Value> result;
@@ -604,9 +601,28 @@ public:
         }
     }
 
+    inline bool SeekEntity(EB_Position &position, std::error_code &e) {
+        EB_Error_Code eb_code = eb_seek_text(&book_, &position);
+
+        if (eb_code == EB_SUCCESS) {
+            return true;
+        } else {
+            e = make_error_code(static_cast<eb_error>(eb_code));
+            return false;
+        }
+    }
+
+    inline bool SeekTextConvenient(EB_Position &position, std::error_code &e) {
+        if (position.page != last_sought_text_.page ||
+            position.offset != last_sought_text_.offset) {
+            return SeekEntity(position, e);
+        } else {
+            return true;
+        }
+    }
+
     size_t ReadUcs2Text(reader_fun function,
                         EB_Hookset &hookset,
-                        EB_Position &position,
                         char *buffer,
                         size_t buffer_size,
                         std::error_code &error) {
@@ -615,15 +631,7 @@ public:
 
         char tmp_buffer[buffer_size];
         ssize_t text_length;
-        EB_Error_Code eb_code;
 
-        eb_code = eb_seek_text(&book_, &position);
-        if (eb_code != EB_SUCCESS) {
-            error = make_error_code(static_cast<eb_error>(eb_code));
-            return -1;
-        }
-
-        v8::Locker v8_lock;
         v8::HandleScope handle_scope;
         v8::Context::Scope context_scope(js_context_);
 
@@ -636,9 +644,13 @@ public:
         // contain char ranges with different character encodings. Each
         // range is described in the HookContext::byte_ranges vector by
         // hook functions. Later, we'll encode bufer into UTF-8.
-        eb_code = (*function)(&book_, NULL, &hookset, &write_context,
-                              sizeof(tmp_buffer) - 1, tmp_buffer, &text_length);
-
+        EB_Error_Code eb_code = (*function)(&book_,
+                                            NULL,
+                                            &hookset,
+                                            &write_context,
+                                            sizeof(tmp_buffer) - 1,
+                                            tmp_buffer,
+                                            &text_length);
         if (eb_code != EB_SUCCESS) {
             error = make_error_code(static_cast<eb_error>(eb_code));
             return -1;
@@ -729,7 +741,7 @@ public:
 
         // Pipe the article's heading through the user script.
         using namespace v8;
-        Locker v8_lock;
+
         HandleScope handle_scope;
         Context::Scope context_scope(js_context_);
 
@@ -777,6 +789,14 @@ public:
         }
     }
 
+    inline size_t ReadHeading(char *buffer, size_t size, std::error_code &e) {
+        return ReadUcs2Text(&eb_read_heading, head_hookset_, buffer, size, e);
+    }
+
+    inline size_t ReadText(char *buffer, size_t size, std::error_code &e) {
+        return ReadUcs2Text(&eb_read_text, text_hookset_, buffer, size, e);
+    }
+
 public:
     EpwingDictionary *q;
     EB_Book book_;
@@ -784,10 +804,7 @@ public:
     EB_Hookset head_hookset_;
     EB_Hookset text_hookset_;
 
-    bool have_previous_search_;
-    EB_Hit hit_cache[50];
-    size_t hit_cache_offset;
-    size_t hit_cache_length;
+    EB_Position last_sought_text_;
 
     v8::Persistent<v8::Context> js_context_;
     v8::Persistent<v8::Function> js_functions_[g_js_function_count];
@@ -799,33 +816,31 @@ public:
                     size_t hit_count,
                     EB_Hit *hits)
       : d(p),
-        hit_offset_(0),
+        hit_offset_(-1),
         hit_count_(hit_count),
         hits_(hits)
     {
     }
 
-    virtual size_t GetCount() const {
+    size_t GetCount() const {
         return hit_count_;
     }
 
     bool SeekNext() {
-        if (++hit_offset_ < hit_count_)
+        size_t offset = hit_offset_ + 1;
+        std::error_code e;
+
+        if (offset < hit_count_ && d->SeekEntity(hits_[offset].heading, e)) {
+            hit_offset_ = offset;
             return true;
-        else
+        } else {
             return false;
+        }
     }
 
     Likely<size_t> InitializeHeadingData(char *buffer, size_t buffer_size) {
         std::error_code error;
-
-        // Enter the v8 context, a requirement for Private::ReadUcs2Text.
-        size_t length = d->ReadUcs2Text(&eb_read_heading,
-                                        d->head_hookset_,
-                                        hits_[hit_offset_].heading,
-                                        buffer,
-                                        buffer_size,
-                                        error);
+        size_t length = d->ReadHeading(buffer, buffer_size, error);
 
         if (length != (size_t) -1)
             return length;
@@ -852,13 +867,13 @@ public:
             return error;
     }
 
-    Likely<size_t> FetchShortHeading(const char *data,
-                                     size_t data_length,
-                                     char *buffer,
-                                     size_t buffer_size) {
+    Likely<size_t> FetchTags(const char *data,
+                             size_t data_length,
+                             char *buffer,
+                             size_t buffer_size) {
         std::error_code error;
         size_t length = d->PipeStringThroughJsFunction(
-                JsFunction::ProcessShortHeading,
+                JsFunction::ProcessTags,
                 data,
                 data_length,
                 buffer,
@@ -896,12 +911,17 @@ private:
     size_t hit_offset_;
     size_t hit_count_;
     EB_Hit *hits_;
+
+    v8::Locker v8_lock_;
 };
 
-EpwingDictionary::EpwingDictionary(Config *conf)
-    : Dictionary(conf),
-      d(new Private(this))
+EpwingDictionary::EpwingDictionary(Config *conf) : Dictionary(conf)
 {
+    // Instantiate Locker before doing anything JS related to let v8 know
+    // that we might be using threads.
+    v8::Locker lock;
+
+    d = new Private(this);
 }
 
 EpwingDictionary::~EpwingDictionary()
@@ -1031,10 +1051,15 @@ Likely<size_t> EpwingDictionary::ReadText(const char *guid, char **ptr)
     EB_Position position;
     std::error_code last_error;
 
-    if (!GuidToPosition(guid, position, last_error)) {
+    if (!GuidToPosition(guid, position, last_error) ||
+        !d->SeekTextConvenient(position, last_error)) {
         *ptr = NULL;
         return last_error;
     }
+
+    // Acquire big v8 lock (a requiremenet imposed by ReadText and
+    // PipeStringThroughJsFunction methods).
+    v8::Locker v8_lock;
 
     size_t tmp_buffer_size = 4096;
 
@@ -1043,13 +1068,7 @@ Likely<size_t> EpwingDictionary::ReadText(const char *guid, char **ptr)
     // we need to guess an optimal size of the buffer by using bruteforce.
     while (true) {
         char tmp_buffer[tmp_buffer_size];
-
-        size_t length = d->ReadUcs2Text(&eb_read_text,
-                                        d->text_hookset_,
-                                        position,
-                                        tmp_buffer,
-                                        tmp_buffer_size,
-                                        last_error);
+        size_t length = d->ReadText(tmp_buffer, tmp_buffer_size, last_error);
 
         if (length != (size_t) -1) {
             // Text read successfully.
@@ -1089,18 +1108,19 @@ Likely<size_t> EpwingDictionary::ReadText(const char *guid,
     EB_Position position;
     std::error_code last_error;
 
-    if (!GuidToPosition(guid, position, last_error))
+    if (!GuidToPosition(guid, position, last_error) ||
+        !d->SeekTextConvenient(position, last_error)) {
         return last_error;
+    }
+
+    // Acquire big v8 lock (a requiremenet imposed by ReadText and
+    // PipeStringThroughJsFunction methods).
+    v8::Locker v8_lock;
 
     // We need a temporary buffer to store the UCS-2 text.
     char tmp_buffer[buffer_size];
 
-    size_t length = d->ReadUcs2Text(&eb_read_text,
-                                    d->text_hookset_,
-                                    position,
-                                    tmp_buffer,
-                                    buffer_size,
-                                    last_error);
+    size_t length = d->ReadText(tmp_buffer, buffer_size, last_error);
     if (length == (size_t)-1)
         return last_error;
 
@@ -1114,6 +1134,50 @@ Likely<size_t> EpwingDictionary::ReadText(const char *guid,
         return length;
     else
         return last_error;
+}
+
+Likely<Dictionary::SearchResults *> EpwingDictionary::GetResults(
+                                                             size_t max_count)
+{
+    EB_Error_Code eb_code;
+    size_t total_count = 0;
+    int increase_step = 256;
+
+    struct SearchResultsMemoryLayout {
+        uint8_t results[sizeof(EbSearchResults)];
+        EB_Hit hits[];
+    } *sr = NULL;
+
+    while (true) {
+        int step = std::min(max_count - total_count, (size_t)increase_step);
+
+        sr = static_cast<SearchResultsMemoryLayout *>(
+                realloc(sr, sizeof(SearchResultsMemoryLayout) + \
+                            total_count * sizeof(EB_Hit)      + \
+                            step * sizeof(EB_Hit)));
+
+        int hit_count;
+        eb_code = eb_hit_list(&d->book_,
+                              step,
+                              sr->hits + total_count,
+                              &hit_count);
+
+        if (eb_code == EB_SUCCESS) {
+            total_count += hit_count;
+
+            // Be done, if the number of returned hits is less than the number
+            // of items we've allocated or we've reached maximum number of
+            // results.
+            if (hit_count < step || total_count >= max_count)
+                break;
+        } else {
+            return make_error_code(static_cast<eb_error>(eb_code));
+        }
+    }
+
+    SearchResults *results =
+        new(sr->results) EbSearchResults(d, total_count, sr->hits);
+    return results;
 }
 
 Likely<EpwingDictionary *> EpwingDictionary::New(const char *path,
@@ -1168,56 +1232,16 @@ std::error_code EpwingDictionary::Initialize()
     return last_error;
 }
 
-Likely<Dictionary::SearchResults *> EpwingDictionary::GetResults(
-                                                             size_t max_count)
-{
-    EB_Error_Code eb_code;
-    size_t total_count = 0;
-    int increase_step = 256;
-
-    struct SearchResultsMemoryLayout {
-        uint8_t results[sizeof(EbSearchResults)];
-        EB_Hit hits[];
-    } *sr = NULL;
-
-    while (true) {
-        int step = std::min(max_count - total_count, (size_t)increase_step);
-
-        sr = static_cast<SearchResultsMemoryLayout *>(
-                realloc(sr, sizeof(SearchResultsMemoryLayout) + \
-                            total_count * sizeof(EB_Hit)      + \
-                            step * sizeof(EB_Hit)));
-
-        int hit_count;
-        eb_code = eb_hit_list(&d->book_,
-                              step,
-                              sr->hits + total_count,
-                              &hit_count);
-
-        if (eb_code == EB_SUCCESS) {
-            total_count += hit_count;
-
-            // Be done, if the number of returned hits is less than the number
-            // of items we've allocated or we've reached maximum number of
-            // results.
-            if (hit_count < step || total_count >= max_count)
-                break;
-        } else {
-            return make_error_code(static_cast<eb_error>(eb_code));
-        }
-    }
-
-    SearchResults *results =
-        new(sr->results) EbSearchResults(d, total_count, sr->hits);
-    return results;
-}
-
 inline static EB_Error_Code WriteByteRange(EB_Book *book,
                                            HookContext *context,
                                            Charset charset,
                                            const char *string,
                                            size_t length)
 {
+    if (length == 0) {
+        return EB_SUCCESS;
+    }
+
     // Start new byte range descriptor if the given string doesn't have the
     // same charset as the charset of the previous byte range.
     if (context->byte_ranges.empty() ||
