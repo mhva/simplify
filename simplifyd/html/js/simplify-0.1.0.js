@@ -1,10 +1,19 @@
+/**
+ * Takes 2 or more objects and extends the object in first argument
+ * with properties of other objects. This function doesn't overwrite
+ * existing properties.
+ *
+ * This function is used to extend prototypes, hence the name.
+ *
+ * @return Returns extended object (IOW, object in the first argument).
+ */
 function MergePrototype(proto) {
   for (var i = 1; i < arguments.length; i++) {
-    var classProto = arguments[i];
+    var other = arguments[i];
 
-    for (var key in classProto) {
-      if (!(key in proto)) {
-        proto[key] = classProto[key];
+    for (var key in other) {
+      if (!(key in proto) && other.hasOwnProperty(key)) {
+        proto[key] = other[key];
       }
     }
   }
@@ -12,6 +21,9 @@ function MergePrototype(proto) {
   return proto;
 }
 
+/**
+ * ArticleAgent provides means of fetching dictionary articles.
+ */
 function ArticleAgent(context) {
   this._lastFetchId = null;
 }
@@ -29,6 +41,19 @@ ArticleAgent.prototype = {
     }
   },
 
+  /**
+   * Fetches an article from specified dictionary.
+   *
+   * @param context   Dictionary context of the target dictionary.
+   * @param guid      Article's GUID.
+   * @param onSuccess Callback function that will be called if fetch succeeds.
+   *  This function receives one argument containing article's text.
+   * @param onFailure Callback function that will be called if fetch fails.
+   *  This function receives one argument containing an error message.
+   *
+   * @note If this method is called before previous fetch is complete,
+   *  results of the previous fetch will not be delivered.
+   */
   fetchArticle: function(context, guid, onSuccess, onFailure) {
     var self = this;
     var fetchId = this._lastFetchId = Math.random();
@@ -46,6 +71,12 @@ ArticleAgent.prototype = {
   }
 };
 
+/**
+ * A container class for search results.
+ *
+ * @param context  Context of the dictionary to which the search results belong.
+ * @param response Server response.
+ */
 function ResultsContainer(context, response) {
   this._context = context;
   this._resultSet = response[context.name].results;
@@ -53,10 +84,34 @@ function ResultsContainer(context, response) {
 }
 
 ResultsContainer.prototype = {
+  _getElement: function(elementIndex) {
+    var result = this._resultSet[this._offset];
+
+    if (result !== undefined) {
+      return result[elementIndex];
+    } else {
+      return undefined;
+    }
+  },
+
+  /**
+   * Puts the seek pointer into its initial position.
+   */
   seekFirst: function() {
     this._offset = -1;
   },
 
+  /**
+   * Seeks next result.
+   *
+   * Example usage:
+   *   results.seekFirst();
+   *   while (results.seekNext()) {
+   *     //process result//
+   *   }
+   *
+   * @return Returns true if seek succeeded; otherwise false.
+   */
   seekNext: function() {
     if (this._offset + 1 < this._resultSet.length) {
       this._offset++;
@@ -66,7 +121,12 @@ ResultsContainer.prototype = {
     }
   },
 
-  seekMagic: function(text) {
+  /**
+   * Tries to seek a result that has a tag @tagName.
+   *
+   * @return Returns true if seek succeeded; otherwise false.
+   */
+  seekMagic: function(tagName) {
     for (var i = 0; i < this._resultSet.length; i++) {
       var tagString = this._resultSet[i][2];
 
@@ -76,7 +136,7 @@ ResultsContainer.prototype = {
 
       var tags = tagString.split(',');
       for (var t = 0; t < tags.length; t++) {
-        if (tags[t] === text) {
+        if (tags[t] === tagName) {
           this._offset = i;
           return true;
         }
@@ -86,38 +146,63 @@ ResultsContainer.prototype = {
     return false;
   },
 
+  /**
+   * Returns the number of search results.
+   */
   getResultCount: function() {
     return this._resultSet.length;
   },
 
+  /**
+   * Returns article's guid at the current position.
+   *
+   * @note Calling this method before calling the @seekNext() method, or
+   *  calling it after the @seekNext() method returned false, results in
+   *  undefined behavior.
+   */
   getArticleGuid: function() {
     return this._getElement(0);
   },
 
+  /**
+   * Returns article's heading at the current position.
+   *
+   * @note Calling this method before calling the @seekNext() method, or
+   *  calling it after the @seekNext() method returned false, results in
+   *  undefined behavior.
+   */
   getArticleHeading: function() {
     return this._getElement(1);
   },
 
+  /**
+   * Returns article's tags at the current position.
+   *
+   * @note Calling this method before calling the @seekNext() method, or
+   *  calling it after the @seekNext() method returned false, results in
+   *  undefined behavior.
+   */
   getArticleTags: function() {
-    return this._getElement(2);
+    return this._getElement(2) || '';
   },
 
+  /**
+   * Checks whether the search results were truncated.
+   *
+   * Results are truncated if dictionary has returned too many results for
+   * specific query. Currently, there is no way to retrieve other results
+   * other than using a more specific search query.
+   */
   isTruncated: function() {
-    // TODO:
+    // TODO: Not implemented.
+    console.warning('ResultsContainer.isTruncated() is not implemented');
     return false;
-  },
-
-  _getElement: function(elementIndex) {
-    var result = this._resultSet[this._offset];
-
-    if (result !== undefined) {
-      return result[elementIndex];
-    } else {
-      return undefined;
-    }
   }
 };
 
+/**
+ * SearchAgent provides means of searching a dictionary.
+ */
 function SearchAgent() {
   this._lastSearchId = null;
 }
@@ -144,6 +229,19 @@ SearchAgent.prototype = {
     onFailure(error.toString());
   },
 
+  /**
+   * Searches specified dictionary.
+   *
+   * @param context   Dictionary context of the target dictionary.
+   * @param query     Search query.
+   * @param onSuccess Callback function that will be called if search succeeds.
+   *  This function receives one argument containing a ResultsContainer object.
+   * @param onFailure Callback function that will be called if search fails.
+   *  This function receives one argument containing an error message.
+   *
+   * @note If this method is called before previous search is complete,
+   *  results of the previous search will not be delivered.
+   */
   search: function(context, query, onSuccess, onFailure) {
     var self = this;
     var searchId = this._lastSearchId = Math.random();
@@ -161,14 +259,17 @@ SearchAgent.prototype = {
   }
 };
 
+/**
+ * MagicArticleAgent provides a means to fetch an article by tag.
+ */
 function MagicArticleAgent() {
   this._searchAgent = new SearchAgent();
   this._articleAgent = new ArticleAgent();
 }
 
 MagicArticleAgent.prototype = {
-  _loadArticle: function(ctx, kw, results, onSuccess, onFailure) {
-    if (results.seekMagic(kw)) {
+  _loadArticle: function(ctx, tagName, results, onSuccess, onFailure) {
+    if (results.seekMagic(tagName)) {
       this._articleAgent.fetchArticle(
         ctx,
         results.getArticleGuid(),
@@ -187,28 +288,61 @@ MagicArticleAgent.prototype = {
     }
   },
 
+  /**
+   * Returns an ArticleAgent object used by the MagicArticleAgent to
+   * fetch articles.
+   *
+   * @note Using this agent while the MagicArticleAgent doing its work
+   *  might result in results being not delivered.
+   */
   getArticleAgent: function() {
     return this._articleAgent;
   },
 
+  /**
+   * Returns an ArticleAgent object used by the MagicArticleAgent to
+   * do search.
+   *
+   * @note Using this agent while the MagicArticleAgent doing its work
+   *  might result in results being not delivered.
+   */
   getSearchAgent: function() {
     return this._searchAgent;
   },
 
-  fetchArticle: function(context, keyword, onSuccess, onFailure) {
+  /**
+   * Fetches an article by tag from specified dictionary.
+   *
+   * @param context Dictionary context of the target dictionary.
+   * @param tagName Tag name.
+   * @param onSuccess Callback function that will be called if fetch succeeds.
+   *  This function receives one argument containing a dictionary with the
+   *  following keys: searchResults, articleText. The articleText might not
+   *  exist in the dictionary if article with specified tag was not found.
+   * @param onFailure Callback function that will be called if fetch fails.
+   *  This function receives one argument containing an error message.
+   */
+  fetchArticle: function(context, tagName, onSuccess, onFailure) {
     var self = this;
 
     this._searchAgent.search(
       context,
-      keyword,
+      tagName,
       function(results) {
-        self._loadArticle(context, keyword, results, onSuccess, onFailure);
+        self._loadArticle(context, tagName, results, onSuccess, onFailure);
       },
       onFailure
     );
   }
 };
 
+/**
+ * jQuery plugin that makes a text field do a feedback when text in the field
+ * is changed.
+ *
+ * Once the plugin is initialized on text field it will emit the 'textchanged'
+ * signal every time the text in the field is changed.
+ */
 (function($) {
   var self       = null;
   var eventTimer = null;
@@ -218,8 +352,7 @@ MagicArticleAgent.prototype = {
   function tryEmitEvent(force) {
     var text = $(self).val();
     if (text != lastText || force) {
-      // Reset the stale period to indicate that the user is still
-      // typing.
+      // Reset the stale period to indicate that user is still typing.
       staleTicks = 0;
       lastText = text;
 
@@ -235,6 +368,9 @@ MagicArticleAgent.prototype = {
     }
   };
 
+  /**
+   * Initializes plugin.
+   */
   $.fn.startInstantFeedback = function() {
     self = this;
 
@@ -251,6 +387,11 @@ MagicArticleAgent.prototype = {
     });
   };
 
+  /**
+   * Sets value of the text field.
+   *
+   * If silent is true, 'textchanged' signal will not be emitted.
+   */
   $.fn.setText = function(text, silent) {
     $(this).val(text);
 
@@ -262,21 +403,11 @@ MagicArticleAgent.prototype = {
   };
 })(jQuery);
 
-(function($) {
-  var self = null;
-
-  var calculateHeight = function() {
-    return $(window).height() - $(self).offset().top;
-  };
-
-  $.fn.makeContainer = function() {
-    self = this;
-
-    $(self).height(calculateHeight);
-    $(window).resize(function() { $(self).height(calculateHeight); });
-  };
-})(jQuery);
-
+/**
+ * EventSource is an object that can be used to extend any object, giving
+ * the object an ability to emit signals and others to be able to subscribe to
+ * these signals.
+ */
 function EventSource() {
   this.__init__();
 }
@@ -286,6 +417,14 @@ EventSource.prototype = {
     this._listeners = {};
   },
 
+  /**
+   * Subscribes callback function to receive notifications when signal is
+   * emitted.
+   *
+   * @param signalName The name of the signal.
+   * @param listener   Function that should be invoked every time the signal
+   *  is emitted.
+   */
   bind: function(signalName, listener) {
     if (this._listeners[signalName] === undefined) {
       this._listeners[signalName] = [listener];
@@ -294,6 +433,14 @@ EventSource.prototype = {
     }
   },
 
+  /**
+   * Unsubscribes specified function from receiving signal notifications.
+   *
+   * @param signalName The name of the signal.
+   * @param listener   Function that should be unsubscribed from receiving
+   *  notifications. If this parameter is omitted, all subscribers will be
+   *  unsubscribed from receiving the signal.
+   */
   unbind: function(signalName, listener) {
     var listenerList = this._listeners[signalName];
 
@@ -313,6 +460,12 @@ EventSource.prototype = {
     }
   },
 
+  /**
+   * Triggers a signal.
+   *
+   * @param signalName The name of the signal.
+   * @param argv       A list of arguments to pass to each callback function.
+   */
   trigger: function(signalName, argv) {
     var listenerList = this._listeners[signalName];
 
