@@ -4,7 +4,8 @@
  * ArticleAction.
  */
 function ArticleAction(context, widget) {
-  this.__proto__.__proto__.__init__.call(this);
+  EventSource.prototype.__init__.call(this);
+
   this._context = context;
   this._articleAgent = new ArticleAgent();
   this._lastGuid = null;
@@ -12,7 +13,7 @@ function ArticleAction(context, widget) {
   this._widget = widget;
 }
 
-ArticleAction.prototype = {
+ArticleAction.prototype = MergePrototype({
   update: function() {
     var self = this;
     var guid = this._lastGuid;
@@ -47,13 +48,14 @@ ArticleAction.prototype = {
       return this._lastGuid;
     }
   },
-}; MergePrototype(ArticleAction.prototype, SignalUserPrototype);
+}, EventSource.prototype);
 
 /**
  * SearchAction.
  */
 function SearchAction(context, widget) {
-  this.__proto__.__proto__.__init__.call(this);
+  EventSource.prototype.__init__.call(this);
+
   this._context = context;
   this._searchAgent = new SearchAgent();
   this._widget = widget;
@@ -61,7 +63,7 @@ function SearchAction(context, widget) {
   this._lastGoodQuery = '';
 }
 
-SearchAction.prototype = {
+SearchAction.prototype = MergePrototype({
   update: function() {
     var self = this;
     var query = this._lastQuery;
@@ -102,7 +104,7 @@ SearchAction.prototype = {
       return this._lastQuery;
     }
   }
-}; MergePrototype(SearchAction.prototype, SignalUserPrototype);
+}, EventSource.prototype);
 
 (function($) {
   var globalContext;

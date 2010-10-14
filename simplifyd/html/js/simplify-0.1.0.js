@@ -1,6 +1,4 @@
 function MergePrototype(proto) {
-  var tail = proto;
-
   for (var i = 1; i < arguments.length; i++) {
     var classProto = arguments[i];
 
@@ -9,22 +7,9 @@ function MergePrototype(proto) {
         proto[key] = classProto[key];
       }
     }
-
-    tail.__proto__ = classProto;
-    tail = classProto;
   }
 
   return proto;
-}
-
-function MakePrototype() {
-  var argv = [{}];
-
-  for (var i = 0; i < arguments.length; i++) {
-    argv.push(arguments[i]);
-  }
-
-  return MergePrototype.apply(this, argv);
 }
 
 function ArticleAgent(context) {
@@ -292,7 +277,11 @@ MagicArticleAgent.prototype = {
   };
 })(jQuery);
 
-var SignalUserPrototype = {
+function EventSource() {
+  this.__init__();
+}
+
+EventSource.prototype = {
   __init__: function() {
     this._listeners = {};
   },
@@ -339,9 +328,10 @@ function ArticleWidget(parent, conf) {
   this.__init__(parent, conf);
 }
 
-ArticleWidget.prototype = {
+ArticleWidget.prototype = MergePrototype({
   __init__: function(parent, conf) {
-    this.__proto__.__proto__.__init__.call(this);
+    EventSource.prototype.__init__.call(this);
+
     this._discardLookup = false;
     this._containerDom =
       $('<div class="' + (conf.containerClass || 'article') + '"></div>');
@@ -392,15 +382,16 @@ ArticleWidget.prototype = {
   visible: function() {
     return $(this._containerDom).is(':visible');
   }
-}; MergePrototype(ArticleWidget.prototype, SignalUserPrototype);
+}, EventSource.prototype);
 
 function SearchResultsWidget(parent, conf) {
   this.__init__(parent, conf);
 }
 
-SearchResultsWidget.prototype = {
+SearchResultsWidget.prototype = MergePrototype({
   __init__: function(parent, conf) {
-    this.__proto__.__proto__.__init__.call(this);
+    EventSource.prototype.__init__.call(this);
+
     this._containerDom =
       $('<div class="' + (conf.containerClass || 'results') + '"></div>');
 
@@ -462,7 +453,7 @@ SearchResultsWidget.prototype = {
   visible: function() {
     return $(this._containerDom).is(':visible');
   }
-}; MergePrototype(SearchResultsWidget.prototype, SignalUserPrototype);
+}, EventSource.prototype);
 
 function OverlayArticleWidget(parent, conf) {
   // Dynamically create and append widget's DOM to parent's DOM.
