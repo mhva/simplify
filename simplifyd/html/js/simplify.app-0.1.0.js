@@ -106,6 +106,7 @@ SearchAction.prototype = {
 
 (function($) {
   var globalContext;
+  var tabContexts = [];
   var tabWidget;
   var overlayWidget;
   $.simplify = {};
@@ -125,7 +126,7 @@ SearchAction.prototype = {
   }
 
   function handleTwOnBeforeClickEvent(event, index) {
-    var ctx = this.getCurrentPane().data('PaneContext');
+    var ctx = tabContexts[this.getIndex()];
 
     // There will be no context if there was no tab selected before, so
     // be careful.
@@ -135,7 +136,8 @@ SearchAction.prototype = {
   }
 
   function handleTwOnClickEvent(event, index) {
-    var ctx = this.getPanes().eq(index).data('PaneContext');
+    var ctx = tabContexts[index];
+
     ctx.searchAction.update();
     ctx.articleAction.update();
     document.title = ctx.dictContext.name;
@@ -145,8 +147,8 @@ SearchAction.prototype = {
     $.simplify.dispatch($.deparam.fragment(event.fragment));
   }
 
-  function handleInlineLookupEvent(dictContext, text) {
-    overlayWidget.show(dictContext, text);
+  function handleInlineLookupEvent(text) {
+    overlayWidget.show(tabContexts[tabWidget.getIndex()].dictContext, text);
   }
 
   function handleOpenArticleEvent(guid) {
@@ -158,10 +160,10 @@ SearchAction.prototype = {
     // handler to avoid any actions from dispatch function.
     $(window).unbind('hashchange', handleHashChangeEvent);
 
-    var ctx = tabWidget.getCurrentPane().data('PaneContext');
     var tabIndex = tabWidget.getIndex();
-    var searchQuery = ctx.searchAction.searchQuery();
     var scrollOffset = $('#content').scrollTop();
+    var searchQuery =
+      tabContexts[tabWidget.getIndex()].searchAction.searchQuery();
 
     var intermediate = {
       'do': 'search',
@@ -195,32 +197,31 @@ SearchAction.prototype = {
 
   function initializeTabWidgetPanes() {
     $('#content > div').each(function(index) {
-      var dictContext = globalContext.dicts[index];
       var srwidget = new SearchResultsWidget(this, {
         containerClass: 'search-result-container'
       });
       var awidget = new ArticleWidget(this, {
         containerClass: 'article-container'
       });
-      var paneContext = {
-        dictContext: dictContext,
-        searchAction: new SearchAction(dictContext, srwidget),
-        articleAction: new ArticleAction(dictContext, awidget),
+      var tabContext = {
+        dictContext: globalContext.dicts[index],
+        searchAction: new SearchAction(globalContext.dicts[index], srwidget),
+        articleAction: new ArticleAction(globalContext.dicts[index], awidget),
         searchWidget: srwidget,
         articleWidget: awidget,
         savedScrollOffset: 0
       };
-      var restoreScrollFun = function() {
-        $('#content').scrollTop(paneContext.savedScrollOffset);
-      };
 
-      awidget.bind('inlineLookup', function(text) {
-        handleInlineLookupEvent(dictContext, text);
-      });
+      awidget.bind('inlineLookup', handleInlineLookupEvent);
       srwidget.bind('openArticle', handleOpenArticleEvent);
-      paneContext.searchAction.bind('updated', restoreScrollFun);
-      paneContext.articleAction.bind('updated', restoreScrollFun);
-      $(this).data('PaneContext', paneContext);
+
+      var restoreScrollFun = function() {
+        $('#content').scrollTop(tabContext.savedScrollOffset);
+      };
+      tabContext.searchAction.bind('updated', restoreScrollFun);
+      tabContext.articleAction.bind('updated', restoreScrollFun);
+
+      tabContexts.push(tabContext);
     });
   }
 
@@ -281,29 +282,26 @@ SearchAction.prototype = {
     switch (params.do) {
       case 'article':
         // TODO: Load a lucky result for other dictionaries.
-        var ctx = tabWidget.getPanes().eq(tabIndex).data('PaneContext');
-        fetchArticleHelper(ctx, params.guid, 0);
+        fetchArticleHelper(tabContexts[tabIndex], params.guid, 0);
         tabWidget.click(tabIndex);
         break;
       case 'search':
-        tabWidget.getPanes().each(function(index) {
-          var ctx = $(this).data('PaneContext');
+        searchHelper(ctx, query, params.so || 0);
+        tabWidget.click(tabIndex);
 
-          if (tabIndex != index) {
-            searchHelper(ctx, query, 0);
-          } else {
-            searchHelper(ctx, query, params.so || 0);
-            tabWidget.click(index);
+        for (var i = 0; i < tabContexts.length; i++) {
+          if (i != tabIndex) {
+            searchHelper(tabContexts[i], query, 0);
           }
-        });
+        }
         break;
     }
   };
 
   $.simplify.globalSearch = function(query) {
-    tabWidget.getPanes().each(function() {
-      searchHelper($(this).data('PaneContext'), query, 0);
-    });
+    for (var i = 0; i < tabContexts.length; i++) {
+      searchHelper(tabContexts[i], query, 0);
+    }
   };
 })(jQuery);
 
