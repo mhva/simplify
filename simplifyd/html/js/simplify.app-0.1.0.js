@@ -288,7 +288,7 @@ SearchAction.prototype = MergePrototype({
         tabWidget.click(tabIndex);
         break;
       case 'search':
-        searchHelper(ctx, query, params.so || 0);
+        searchHelper(tabContexts[tabIndex], query, params.so || 0);
         tabWidget.click(tabIndex);
 
         for (var i = 0; i < tabContexts.length; i++) {
@@ -314,7 +314,6 @@ function handleTextChangedEvent(event, text) {
 $(document).ready(function() {
   $('#query-edit').bind('textchanged', handleTextChangedEvent);
   $('#query-edit').startInstantFeedback();
-  $('#content').makeContainer();
 
   $.simplify.initialize();
   $.simplify.dispatch($.deparam.fragment());
