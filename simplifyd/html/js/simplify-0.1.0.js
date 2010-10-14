@@ -589,7 +589,7 @@ SearchResultsWidget.prototype = MergePrototype({
         stringList.push('</a>');
       }
     } else {
-      stringList.push('<span class="result-count">No matches found</span>');
+      stringList.push('<h3 class="result-count">No matches found</h3>');
     }
 
     $(this._containerDom).html(stringList.join(''));
