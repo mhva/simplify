@@ -276,11 +276,3 @@ body {
   font-size: 10pt;
   line-height: 1.4em;
 }
-
-/*
- * Dictionary specific classes.
- * TODO: Allow dynamic loading of custom CSS styles.
- */
-.djs-section {
-  margin: 1em 0 0 0;
-}
