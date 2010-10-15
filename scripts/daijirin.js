@@ -143,6 +143,8 @@ CharMapper.prototype = {
 // ====================================================================
 
 var gaijiMap = {
+  0xae7a: '【',
+  0xae7b: '】'
 };
 
 var articleGaijiRanges = {
@@ -961,7 +963,8 @@ function Newline() {
 //}
 
 function InsertHeadingGaiji(gaijiCode) {
-  return '';
+  var result = gaijiMap[gaijiCode];
+  return result ? result : '&lt;0x' + gaijiCode.toString(16) + '&gt;';
 }
 
 function InsertTextGaiji(gaijiCode) {
@@ -976,10 +979,10 @@ function InsertTextGaiji(gaijiCode) {
     }
   }
 
-  //// Try to look up the gaiji in the map with singular gaiji.
-  //result = gaijiMap[gaijiCode];
+  // Try the map containing individual gaiji mappings.
+  result = gaijiMap[gaijiCode];
 
-  return (result) ? result : '&lt;0x' + gaijiCode.toString(16) + '&gt;';
+  return result ? result : '&lt;0x' + gaijiCode.toString(16) + '&gt;';
 }
 
 function BeginKeyword() {
