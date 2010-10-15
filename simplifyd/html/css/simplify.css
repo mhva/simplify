@@ -116,7 +116,7 @@ body {
 .article-title {
   font-size: 1.5em;
   font-weight: bold;
-  margin-bottom: 5px;
+  margin-bottom: 1em;
 }
 
 .overlay {
@@ -238,55 +238,49 @@ body {
   background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABYAAAAWCAYAAADEtGw7AAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAAN1wAADdcBQiibeAAAAAd0SU1FB9oIHQIkGXt1zGIAAAGlSURBVDjL3ZWxSiNRFIa/mxGzCjYLblZII6ZYbBObFJb7AFnIE1ikzBYJpNPSyjzAspWNjeVmQSsFyQYCs8RGLLIBkaBYWEwyGLi/hckyDKOTgMKyB34YmLnf/Pece841kniLSPBGEQs243hV8Bi4AiwbY5zXTsWi53n7lUpl0xiTnNq9pL8CTEgJICPpt7X20nXdbSAFJILrohSGvgfWAsoAG5JOJP2SdDEcDn+Uy+VNIAmY58BmctzGW1yT9DNiY1fA5FwuAgvtdvsgl8t9A24l2fCCuXC9gMuojAWeh4CTzWa/eJ6XrVare8aYFvCgQFOEHWck7c5Q/CVJS81m8zCfz38H7ibwuYiP/RnA/mg0uu50Oh/iUjET2HXd60Kh8Kfb7R4F3UaBNc7hyzZ936/Vav16ve4Cp5L8OMf3qVTqPFhMa+27fr//0XEcB6DVat0Vi8WbXq93DPT03BSLaJD5gJLAJ2vtzmAw2C6VSmXgM7AwdYNEvnz6UabRaHxNp9NbwOpLTRHZIDFDaB04kzSYtrAmbtBPho5mvBHM/3eD/HPgR3FHO/UylnfOAAAAAElFTkSuQmCC) 0 2px no-repeat;
 }
 
-/*
- * Dictionary specific classes.
- * TODO: Allow dynamic loading of custom CSS styles.
- */
-.djs-lv1-item, .djs-lv2-item {
+.a-li {
   display: table;
 }
 
-.djs-lv1-text, .djs-lv2-text, .djs-lv1-number, .djs-lv2-number {
+.a-ln {
   display: table-cell;
-}
-
-.djs-lv1-number, .djs-lv2-number {
   width: 2em;
 }
 
-.djs-lv1-number {
-  font-family: IPAPMincho,serif;
-  font-size: 13pt;
-}
-
-.djs-section {
-  margin: 1em 0 0 0;
-}
-
-.djs-spec {
-  display: table;
-  margin: 1em 0 0 0;
-}
-
-.djs-spec-type, .djs-spec-text {
+.a-lt {
   display: table-cell;
 }
 
-.djs-spec-text {
-  padding-left: 1em;
-  font-size: 10pt;
-  line-height: 1.4em;
+.a-spec-item {
+  display: table;
+  /*margin: 1em 0 0 0;*/
 }
 
-.djs-spec-type {
+.a-spec-name {
+  display: table-cell;
   width: 4em;
   text-align: center;
   font-size: 8pt;
 }
 
-.djs-spec-type p {
+.a-spec-name > p {
   line-height: 1em;
   color: #fff;
   background-color: #000 !important;
   padding: 3px 0 3px 0;
+}
+
+.a-spec-text {
+  display: table-cell;
+  padding-left: 1em;
+  font-size: 10pt;
+  line-height: 1.4em;
+}
+
+/*
+ * Dictionary specific classes.
+ * TODO: Allow dynamic loading of custom CSS styles.
+ */
+.djs-section {
+  margin: 1em 0 0 0;
 }

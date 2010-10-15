@@ -164,24 +164,6 @@ var articleGaijiRanges = {
 };
 
 // ====================================================================
-// Utility functions.
-// ====================================================================
-
-/**
- * Returns a new string with special JSON characters escaped.
- */
-var EscapeJsonString = (function() {
-  var matchJsonSpecialCharsRe = /["\\]/g;
-  var replaceFun = function($0) {
-    return '\\' + $0;
-  };
-
-  return function(string) {
-    return string.replace(matchJsonSpecialCharsRe, replaceFun);
-  };
-})();
-
-// ====================================================================
 // TextProcessor.
 // ====================================================================
 
@@ -342,7 +324,7 @@ TextProcessor.prototype = {
   _DecorateTitle: (function() {
     var matchTitleRe = /^\s*(.*?)␊\s*/;
     var replaceFun = function($0, $1) {
-      return '<div class="article-title djs-title">' + $1 + '</div>';
+      return '<div class="article-title">' + $1 + '</div>';
     };
 
     return function(text) {
@@ -420,8 +402,8 @@ TextProcessor.prototype = {
                  ']+)', 'g');
 
     var replaceFun = function($0, $1, $2) {
-      return '<div class="djs-lv2-item"><span class="djs-lv2-number">' + $1 +
-        '</span><span class="djs-lv2-text">' + $2 + '</span></div>';
+      return '<div class="a-li"><span class="a-ln">' + $1 +
+        '</span><span class="a-lt">' + $2 + '</span></div>';
     };
 
     return function(meaningText) {
@@ -448,8 +430,8 @@ TextProcessor.prototype = {
       return text.replace(matchMeaningRe, function($0, $1, $2) {
         var number = mapper.GetDstCharDelta($1) + 1;
 
-        return '<div class="djs-lv1-item"><span class="djs-lv1-number">' +
-          number + '</span><span class="djs-lv1-text">' +
+        return '<div class="a-li"><span class="a-ln">' +
+          number + '</span><span class="a-lt">' +
           self._DecorateSubMeanings($2) + '</span></div>';
       });
     };
@@ -472,8 +454,8 @@ TextProcessor.prototype = {
                 ']*)', 'g');
 
     var Decorate = function(name, text) {
-      return '␊<div class="djs-spec"><span class="djs-spec-type"><p>' + name +
-        '</p></span><span class="djs-spec-text">' +
+      return '␊<div class="a-spec-item"><span class="a-spec-name"><p>' + name +
+        '</p></span><span class="a-spec-text">' +
         this._EscapeListNumbers(text) + '</span></div>';
     };
 
@@ -514,7 +496,7 @@ TextProcessor.prototype = {
     text = this._DecorateTitle(text);
     text = this._StripGarbage(text);
 
-    return EscapeJsonString(text);
+    return _EscapeJsonString(text);
   }
 };
 
@@ -685,7 +667,7 @@ HeadingProcessor.prototype = {
         this.processedHeading = heading;
 
         heading = this._TranslateFullWidthLatin(heading);
-        return EscapeJsonString(heading);
+        return _EscapeJsonString(heading);
       } else {
         // Be 100% that we are skipping a Kanji entry. There're some headings
         // containing only 1 hiragana/katakana char and we don't want to drop
@@ -737,7 +719,7 @@ HeadingProcessor.prototype = {
         // but I'm not sure.
         tags.push(templSource.slice(0, left));
 
-        return EscapeJsonString(tags.join(','));
+        return _EscapeJsonString(tags.join(','));
       } else {
         // The heading contains only a reading, so we make this reading a tag.
 

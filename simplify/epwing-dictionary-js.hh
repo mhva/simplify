@@ -25,6 +25,17 @@ namespace simplify {
 
 const char *g_default_js_implementation = \
 u8R"#(
+    _EscapeJsonString = (function() {
+      var matchJsonSpecialCharsRe = /["\\]/g;
+      var replaceFun = function($0) {
+        return '\\' + $0;
+      };
+
+      return function(string) {
+        return string.replace(matchJsonSpecialCharsRe, replaceFun);
+      };
+    })();
+
     function _BeginSubscript() {
         return '<sub>';
     }
@@ -98,7 +109,7 @@ u8R"#(
     }
 
     function _ProcessHeading(heading) {
-        return heading;
+        return _EscapeJsonString(heading);
     }
 
     function _ProcessTags(heading) {
@@ -106,7 +117,7 @@ u8R"#(
     }
 
     function _ProcessText(text) {
-        return text;
+        return _EscapeJsonString(text);
     }
 )#";
 
