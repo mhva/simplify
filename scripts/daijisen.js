@@ -337,53 +337,26 @@ TextProcessor.prototype = {
    */
   _DecorateCategories: (function() {
     var matchNumberedLexCatRe =
-      new RegExp('[' +
+      new RegExp('([' +
                  articleGaijiRanges.lexicalCategory.GetRegexpRange() +
-                 '][^␊◆' +
+                 '])([^␊◆' +
                  articleGaijiRanges.lexicalCategory.GetRegexpRange() +
-                 articleGaijiRanges.meaningNumber.GetDstCharWithIndex(0) +
-                ']*', 'g');
-
+                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
+                ']*)', 'g');
     var matchNumberedUnkCatRe =
-      new RegExp('[' +
+      new RegExp('([' +
                  articleGaijiRanges.unknownCategory.GetRegexpRange() +
-                 '][^␊◆' +
+                 '])([^␊◆' +
                  articleGaijiRanges.unknownCategory.GetRegexpRange() +
-                 articleGaijiRanges.meaningNumber.GetDstCharWithIndex(0) +
-                 ']*', 'g');
-
-    var matchSingularLexCatRe =
-      new RegExp('(^.*?␊)(.*?)([' +
-                 articleGaijiRanges.meaningNumber.GetDstCharWithIndex(0) +
-                 '])');
+                 ']*)', 'g');
+    var replaceFun = function($0, $1, $2) {
+      return '<div class="a-li"><span class="a-ln">' + $1 +
+        '</span><span class="a-lt">' + $2 + '</span></div>';
+    };
 
     return function(text) {
-      // Replace [Unknown] Category items.
-      text = text.replace(matchNumberedUnkCatRe, function($0) {
-        return '␊<div class="djs-section">' + $0 + '</div>';
-      });
-
-      // Replace numbered Lexical Category items.
-      var hasMatches = false;
-
-      text = text.replace(matchNumberedLexCatRe, function($0) {
-        hasMatches = true;
-        return '␊<div class="djs-section">' + $0 + '</div>';
-      });
-
-      // Finish if we have found numbered list items. None of other section
-      // forms are possible in this text.
-      if (hasMatches) {
-        return text;
-      }
-
-      // Try to find one and only one unnumbered item. Daijisen doesn't number
-      // sections if there is only one section.
-      text = text.replace(matchSingularLexCatRe, function($0, $1, $2, $3) {
-        hasMatches = true;
-        return $1 + '<div class="djs-section">' + $2 + '</div>' + $3;
-      });
-
+      text = text.replace(matchNumberedUnkCatRe, replaceFun);
+      text = text.replace(matchNumberedLexCatRe, replaceFun);
       return text;
     };
   })(),
@@ -420,6 +393,8 @@ TextProcessor.prototype = {
                  articleGaijiRanges.meaningNumber.GetRegexpRange() +
                 '])([^␊◆' +
                  articleGaijiRanges.meaningNumber.GetRegexpRange() +
+                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
+                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
                 ']+)', 'g');
 
     var mapper = articleGaijiRanges.meaningNumber;
@@ -491,8 +466,8 @@ TextProcessor.prototype = {
   ProcessText: function(text) {
     text = this._EscapeInTextReferences(text);
     text = this._DecorateSpecialSections(text);
-    text = this._DecorateCategories(text);
     text = this._DecorateMeanings(text);
+    text = this._DecorateCategories(text);
     text = this._DecorateTitle(text);
     text = this._StripGarbage(text);
 
