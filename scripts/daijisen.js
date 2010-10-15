@@ -362,29 +362,6 @@ TextProcessor.prototype = {
   })(),
 
   /**
-   * Helper function for finding and enclosing sub-meanings into HTML tags.
-   *
-   * The string must be a text of parent meaning.
-   */
-  _DecorateSubMeanings: (function() {
-    var matchSubMeaningRe =
-      new RegExp('([' +
-                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
-                 '])([^' +
-                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
-                 ']+)', 'g');
-
-    var replaceFun = function($0, $1, $2) {
-      return '<div class="a-li"><span class="a-ln">' + $1 +
-        '</span><span class="a-lt">' + $2 + '</span></div>';
-    };
-
-    return function(meaningText) {
-      return meaningText.replace(matchSubMeaningRe, replaceFun);
-    };
-  })(),
-
-  /**
    * Finds and encloses meanings and sub-meanings into HTML tags.
    */
   _DecorateMeanings: (function() {
@@ -396,19 +373,29 @@ TextProcessor.prototype = {
                  articleGaijiRanges.lexicalCategory.GetRegexpRange() +
                  articleGaijiRanges.unknownCategory.GetRegexpRange() +
                 ']+)', 'g');
+    var matchSubMeaningRe =
+      new RegExp('([' +
+                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
+                 '])([^' +
+                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
+                 ']+)', 'g');
 
-    var mapper = articleGaijiRanges.meaningNumber;
+    var PrintItem = function(name, text) {
+      return '<div class="a-li"><span class="a-ln">' + name +
+        '</span><span class="a-lt">' + text + '</span></div>';
+    };
+
+    var replaceSubMeaningFun = function($0, $1, $2) {
+      return PrintItem($1, $2);
+    };
+
+    var replaceMeaningFun = function($0, $1, $2) {
+      return PrintItem(articleGaijiRanges.meaningNumber.GetDstCharDelta($1) + 1,
+                       $2.replace(matchSubMeaningRe, replaceSubMeaningFun));
+    };
 
     return function(text) {
-      var self = this;
-
-      return text.replace(matchMeaningRe, function($0, $1, $2) {
-        var number = mapper.GetDstCharDelta($1) + 1;
-
-        return '<div class="a-li"><span class="a-ln">' +
-          number + '</span><span class="a-lt">' +
-          self._DecorateSubMeanings($2) + '</span></div>';
-      });
+      return text.replace(matchMeaningRe, replaceMeaningFun);
     };
   })(),
 
@@ -422,13 +409,13 @@ TextProcessor.prototype = {
                  articleGaijiRanges.unknownCategory.GetRegexpRange() +
                 ']*)', 'g');
 
-    var matchRuigoSectionRe =
+    var matchHosetsuSectionRe =
       new RegExp('◆([^␊◆' +
                  articleGaijiRanges.lexicalCategory.GetRegexpRange() +
                  articleGaijiRanges.unknownCategory.GetRegexpRange() +
                 ']*)', 'g');
 
-    var Decorate = function(name, text) {
+    var PrintItem = function(name, text) {
       return '␊<div class="a-spec-item"><span class="a-spec-name"><p>' + name +
         '</p></span><span class="a-spec-text">' +
         this._EscapeListNumbers(text) + '</span></div>';
@@ -438,11 +425,11 @@ TextProcessor.prototype = {
       var self = this;
 
       text = text.replace(matchSpecialSectionRe, function($0, $1, $2) {
-        return Decorate.call(self, $1, $2);
+        return PrintItem.call(self, $1, $2);
       });
 
-      text = text.replace(matchRuigoSectionRe, function($0, $1) {
-        return Decorate.call(self, '補説', $1);
+      text = text.replace(matchHosetsuSectionRe, function($0, $1) {
+        return PrintItem.call(self, '補説', $1);
       });
 
       return text;
