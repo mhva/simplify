@@ -830,11 +830,29 @@ public:
         size_t offset = hit_offset_ + 1;
         std::error_code e;
 
-        if (offset < hit_count_ && d->SeekEntity(hits_[offset].heading, e)) {
-            hit_offset_ = offset;
-            return true;
-        } else {
+        if (unlikely(offset >= hit_count_ ||
+                     !d->SeekEntity(hits_[offset].heading, e)))
             return false;
+
+        hit_offset_ = offset;
+
+        if (offset > 0) {
+            EB_Position &prevText = hits_[offset - 1].text;
+            EB_Position &thisText = hits_[offset].text;
+
+            // For some reason, some dictionaries return two entries
+            // pointing to the same article. It wont be a problem
+            // if there would be only a few duplicates, but in reality,
+            // search results tend to be oversaturated with duplicates.
+            //
+            // It is also worth pointing out that checking each entry
+            // against hash table would be more bullet-proof method,
+            // but I haven't yet encountered any non-adjacent duplicates.
+            return unlikely(
+                    prevText.page == thisText.page &&
+                    prevText.offset == thisText.offset) ? SeekNext() : true;
+        } else {
+            return true;
         }
     }
 
