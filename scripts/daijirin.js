@@ -197,324 +197,6 @@ TextProcessor.prototype = {
       return text;
     };
   })(),
-//  /**
-//   * Escapes list numbers that are enclosed into certain brackets.
-//   * These list numbers are known to be references.
-//   *
-//   * Each such number occurrence is replaced with numeric character reference.
-//   */
-//  _EscapeEnclosedListNumbers: (function() {
-//    var matchListNumberRe =
-//      new RegExp('[' +
-//                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
-//                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
-//                 articleGaijiRanges.meaningNumber.GetRegexpRange() +
-//                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
-//                 ']');
-//
-//    return function(text) {
-//      var chunks = [];
-//
-//      var left = '（［「《〈';
-//      var right = '〉》」］）';
-//
-//      var openCount = 0;
-//      var sliceFrom = 0;
-//
-//      for (var i = 0; i < text.length; i++) {
-//        var lindex;
-//        var rindex;
-//
-//        if (matchListNumberRe.test(text[i])) {
-//          if (openCount > 0) {
-//            chunks.push(text.slice(sliceFrom, i));
-//            chunks.push('&#' + text[i].charCodeAt(0) + ';');
-//          } else {
-//            chunks.push(text.slice(sliceFrom, i + 1));
-//          }
-//
-//          sliceFrom = i + 1;
-//        } else if ((lindex = left.indexOf(text[i])) != -1) {
-//          openCount++;
-//        } else if ((rindex = right.indexOf(text[i])) != -1) {
-//          if (openCount > 0) {
-//            openCount--;
-//          } else {
-//            print('Mismatched parentheses in text at offset ' + i);
-//          }
-//        }
-//      }
-//
-//      if (sliceFrom < text.length) {
-//        chunks.push(text.slice(sliceFrom));
-//      }
-//
-//      if (openCount > 0) {
-//        print('Got some unclosed parentheses in text');
-//      }
-//
-//      return chunks.join('');
-//    };
-//  })(),
-//
-//  /**
-//   * Escapes list numbers that are references in disguise.
-//   *
-//   * The text representation of these references is indistinguishable from
-//   * either Lexical Category Numbers, or [Unknown] Category Numbers, or
-//   * Meaning Numbers. This function tries its best to escape these references.
-//   */
-//  _EscapeInTextReferences: (function() {
-//    var checkpointRe =
-//      new RegExp('[' +
-//                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
-//                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
-//                 articleGaijiRanges.meaningNumber.GetRegexpRange() +
-//                 ']', 'g');
-//
-//    var actors = [
-//      {
-//        mapper: articleGaijiRanges.meaningNumber,
-//        last  : null,
-//        reset : function() {}
-//      },
-//      {
-//        mapper: articleGaijiRanges.lexicalCategory,
-//        last  : null,
-//        reset : function() { actors[0].last = null; }
-//      },
-//      {
-//        mapper: articleGaijiRanges.unknownCategory,
-//        last  : null,
-//        reset : function() { actors[0].last = null; }
-//      }
-//    ];
-//
-//    // A function that will be called on each matching list number and will
-//    // determine whether the passed list number is a reference or not.
-//    var replaceFun = function($0) {
-//      for (var i = 0; i < actors.length; i++) {
-//        var actor = actors[i];
-//        var number = actor.mapper.GetDstCharDelta($0) + 1;
-//
-//        if (!isNaN(number)) {
-//          if ((actor.last === null && number == 1) || number == actor.last + 1){
-//            actor.last = number;
-//            actor.reset();
-//            return $0;
-//          } else {
-//            return '&#' + $0.charCodeAt(0) + ';';
-//          }
-//        }
-//      }
-//
-//      print('BUG: Shouldn\'t be here. Match: ' + $0);
-//      return $0;
-//    };
-//
-//    return function(text) {
-//      text = this._EscapeEnclosedListNumbers(text);
-//
-//      // Reset each actor's state.
-//      for (var i = 0; i < actors.length; i++) {
-//        actors[i].last = null;
-//      }
-//
-//      return text.replace(checkpointRe, replaceFun);
-//    };
-//  })(),
-//
-//  /**
-//   * Escapes all list numbers in the given string. Each number occurrence will
-//   * be converted into HTML numberic character code.
-//   */
-//  _EscapeListNumbers: (function() {
-//    var matchListNumberRe =
-//      new RegExp('[' +
-//                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
-//                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
-//                 articleGaijiRanges.meaningNumber.GetRegexpRange() +
-//                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
-//                 ']', 'g');
-//
-//    var replaceFun = function($0) {
-//      return '&#' + $0.charCodeAt(0) + ';';
-//    };
-//
-//    return function(text) {
-//      return text.replace(matchListNumberRe, replaceFun);
-//    };
-//  })(),
-//
-//  /**
-//   * Finds and encloses article's title into HTML tags.
-//   */
-//  _DecorateTitle: (function() {
-//    var matchTitleRe = /^\s*(.*?)␊\s*/;
-//    var replaceFun = function($0, $1) {
-//      return '<div class="article-title djs-title">' + $1 + '</div>';
-//    };
-//
-//    return function(text) {
-//      return text.replace(matchTitleRe, replaceFun);
-//    };
-//  })(),
-//
-//  /**
-//   * Finds and encloses category titles into HTML tags.
-//   */
-//  _DecorateCategories: (function() {
-//    var matchNumberedLexCatRe =
-//      new RegExp('[' +
-//                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
-//                 '][^␊◆' +
-//                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
-//                 articleGaijiRanges.meaningNumber.GetDstCharWithIndex(0) +
-//                ']*', 'g');
-//
-//    var matchNumberedUnkCatRe =
-//      new RegExp('[' +
-//                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
-//                 '][^␊◆' +
-//                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
-//                 articleGaijiRanges.meaningNumber.GetDstCharWithIndex(0) +
-//                 ']*', 'g');
-//
-//    var matchSingularLexCatRe =
-//      new RegExp('(^.*?␊)(.*?)([' +
-//                 articleGaijiRanges.meaningNumber.GetDstCharWithIndex(0) +
-//                 '])');
-//
-//    return function(text) {
-//      // Replace [Unknown] Category items.
-//      text = text.replace(matchNumberedUnkCatRe, function($0) {
-//        return '␊<div class="djs-section">' + $0 + '</div>';
-//      });
-//
-//      // Replace numbered Lexical Category items.
-//      var hasMatches = false;
-//
-//      text = text.replace(matchNumberedLexCatRe, function($0) {
-//        hasMatches = true;
-//        return '␊<div class="djs-section">' + $0 + '</div>';
-//      });
-//
-//      // Finish if we have found numbered list items. None of other section
-//      // forms are possible in this text.
-//      if (hasMatches) {
-//        return text;
-//      }
-//
-//      // Try to find one and only one unnumbered item. Daijisen doesn't number
-//      // sections if there is only one section.
-//      text = text.replace(matchSingularLexCatRe, function($0, $1, $2, $3) {
-//        hasMatches = true;
-//        return $1 + '<div class="djs-section">' + $2 + '</div>' + $3;
-//      });
-//
-//      return text;
-//    };
-//  })(),
-//
-//  /**
-//   * Helper function for finding and enclosing sub-meanings into HTML tags.
-//   *
-//   * The string must be a text of parent meaning.
-//   */
-//  _DecorateSubMeanings: (function() {
-//    var matchSubMeaningRe =
-//      new RegExp('([' +
-//                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
-//                 '])([^' +
-//                 articleGaijiRanges.subMeaningNumber.GetRegexpRange() +
-//                 ']+)', 'g');
-//
-//    var replaceFun = function($0, $1, $2) {
-//      return '<div class="djs-lv2-item"><span class="djs-lv2-number">' + $1 +
-//        '</span><span class="djs-lv2-text">' + $2 + '</span></div>';
-//    };
-//
-//    return function(meaningText) {
-//      return meaningText.replace(matchSubMeaningRe, replaceFun);
-//    };
-//  })(),
-//
-//  /**
-//   * Finds and encloses meanings and sub-meanings into HTML tags.
-//   */
-//  _DecorateMeanings: (function() {
-//    var matchMeaningRe =
-//      new RegExp('([' +
-//                 articleGaijiRanges.meaningNumber.GetRegexpRange() +
-//                '])([^␊◆' +
-//                 articleGaijiRanges.meaningNumber.GetRegexpRange() +
-//                ']+)', 'g');
-//
-//    var mapper = articleGaijiRanges.meaningNumber;
-//
-//    return function(text) {
-//      var self = this;
-//
-//      return text.replace(matchMeaningRe, function($0, $1, $2) {
-//        var number = mapper.GetDstCharDelta($1) + 1;
-//
-//        return '<div class="djs-lv1-item"><span class="djs-lv1-number">' +
-//          number + '</span><span class="djs-lv1-text">' +
-//          self._DecorateSubMeanings($2) + '</span></div>';
-//      });
-//    };
-//  })(),
-//
-//  /**
-//   * Finds and encloses special sections(e.g. 類語,下接句 ...) into HTML tags.
-//   */
-//  _DecorateSpecialSections: (function() {
-//    var matchSpecialSectionRe =
-//      new RegExp('␊［(下接句|下接語|可能|類語|用法|派生|形動)］([^◆␊' +
-//                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
-//                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
-//                ']*)', 'g');
-//
-//    var matchRuigoSectionRe =
-//      new RegExp('◆([^␊◆' +
-//                 articleGaijiRanges.lexicalCategory.GetRegexpRange() +
-//                 articleGaijiRanges.unknownCategory.GetRegexpRange() +
-//                ']*)', 'g');
-//
-//    var Decorate = function(name, text) {
-//      return '␊<div class="djs-spec"><span class="djs-spec-type"><p>' + name +
-//        '</p></span><span class="djs-spec-text">' +
-//        this._EscapeListNumbers(text) + '</span></div>';
-//    };
-//
-//    return function(text) {
-//      var self = this;
-//
-//      text = text.replace(matchSpecialSectionRe, function($0, $1, $2) {
-//        return Decorate.call(self, $1, $2);
-//      });
-//
-//      text = text.replace(matchRuigoSectionRe, function($0, $1) {
-//        return Decorate.call(self, '補説', $1);
-//      });
-//
-//      return text;
-//    };
-//  })(),
-//
-//  /**
-//   * Strips garbage characters that we were using as stop chars or something
-//   * else unworthy from string.
-//   *
-//   * Should be used after the main processing is done.
-//   */
-//  _StripGarbage: (function() {
-//    var matchGarbageCharsRe = /␊/g;
-//
-//    return function(text) {
-//      return text.replace(matchGarbageCharsRe, '');
-//    };
-//  })(),
 
   _DecorateLv0Items: (function() {
     var matchLv0aItemRe =
@@ -723,39 +405,9 @@ TextProcessor.prototype = {
 function HeadingProcessor() {}
 HeadingProcessor.prototype = {
   /**
-   * Joins multiple, so called 'Kanji Parts' (text enclosed into 【】) into
-   * one.
-   *
-   * As a side effect, pronunciations will be also removed. It's not like
-   * they mattered anyway.
-   */
-  _JoinKanjiParts: function(text) {
-    var left1;
-    var right1;
-
-    if ((left1 != text.indexOf('【')) != -1 &&
-        (right1 = text.indexOf('】', left1)) != -1) {
-      var chunks = [text.slice(0, right1)];
-      var left2;
-      var right2;
-
-      if ((left2 = text.indexOf('【', right1)) != -1 &&
-          (right2 = text.indexOf('】', left2)) != -1) {
-        chunks.push('・');
-        chunks.push(text.slice(left2 + 1, right2));
-      }
-
-      chunks.push('】');
-      return chunks.join('');
-    } else {
-      return text;
-    }
-  },
-
-  /**
    * Strips some characters from the heading. These characters are used to
-   * show which writings are old Japanese or deprecated, separate hiragana
-   * readings, etc...
+   * show which writings are old Japanese or deprecated and also used to
+   * separate hiragana readings, etc...
    *
    * The problem with these characters that they clutter search results too
    * much. These characters can still be seen in the article page.
@@ -780,24 +432,19 @@ HeadingProcessor.prototype = {
 
     return function(text) {
       var chunks = [];
-      var stoppedAt = Strip(text, 0, '‐・', '【', chunks);
+      var stoppedAt = Strip(text, 0, '−・', '【', chunks);
 
       // Sanitiaze the so called 'Kanji Part' (text enclosed into 【】),
       // if any.
       if (stoppedAt < text.length) {
         stoppedAt = Strip(text, stoppedAt + 1, '‐＝△×', '】', chunks);
 
-        // Ensure that we have parsed the whole string.
-        if (stoppedAt + 1 >= text.length) {
-          return chunks.join('');
-        } else {
-          print('BUG: Unexpected string continuation in: ' + text + '. ' +
-                'Did you join kanji parts?');
-          return text;
+        if (stoppedAt + 1 < text.length) {
+          chunks.push(text.slice(stoppedAt + 1));
         }
-      } else {
-        return chunks.join('');
       }
+
+      return chunks.join('');
     };
   })(),
 
@@ -872,82 +519,75 @@ HeadingProcessor.prototype = {
     var matchHiraganaKatakanaRe = /[あ-ヺ]/;
 
     return function(heading) {
-      // Headings containing one character are often represent an entry
-      // describing Kanji. These entries are not very useful so we drop them.
-      if (heading.length > 1) {
-        heading = this._JoinKanjiParts(heading);
-        heading = this._StripGarbageChars(heading);
+      heading = this._StripGarbageChars(heading);
 
-        // HACK: Save the result so the ProcessTags can later pick it up and
-        // avoid burning unneccessary CPU cycles.
-        this.processedHeading = heading;
+      // HACK: Save the result so the ProcessTags can later pick it up and
+      // avoid burning unneccessary CPU cycles.
+      this.processedHeading = heading;
 
-        heading = this._TranslateFullWidthLatin(heading);
-        return _EscapeJsonString(heading);
-      } else {
-        // Be 100% that we are skipping a Kanji entry. There're some headings
-        // containing only 1 hiragana/katakana char and we don't want to drop
-        // those.
-        if (matchHiraganaKatakanaRe.test(heading)) {
-          this.processedHeading = heading;
-          return heading;
-        } else {
-          this.processedHeading = null;
-          return null;
-        }
-      }
+      heading = this._TranslateFullWidthLatin(heading);
+      return _EscapeJsonString(heading);
     };
   })(),
 
-  ProcessTags: function(heading) {
-    var templSource;
+  ProcessTags: (function() {
+    var stripLangRe = /【（.*）　/;
 
-    if (this.processedHeading !== undefined) {
-      templSource = this.processedHeading;
-      this.processedHeading = undefined;
-    } else {
-      // TODO: Might be a good idea to make ProcessHeading() to look for cached
-      // result.
-      print('Entering a slow processing path in ProcessTags function. Please ' +
-            'consider calling Dictionary::SearchResults::FetchHeading() ' +
-            'before calling Dictionary::SearchResults::FetchTags().');
-      templSource = this.ProcessHeading();
-    }
+    return function(heading) {
+      var templSource;
 
-    if (templSource !== null) {
-      var left;
-
-      // If we have some templates- permute them and produce tags.
-      if (templSource[templSource.length - 1] == '】' &&
-          (left = templSource.indexOf('【')) != -1) {
-        var tags = [];
-        var templates =
-          templSource.slice(left + 1, templSource.length - 1).split('・');
-
-        // Permute each tag template. A tag template might contain a part that
-        // can be optionally removed or inserted (a text inclosed into（）).
-        // We should permute each template and produce real tags.
-        for (var i = 0; i < templates.length; i++) {
-          this._PermuteWord(templates[i], tags);
-        }
-
-        // XXX: Push the reading into tags as well. Might be useful,
-        // but I'm not sure.
-        tags.push(templSource.slice(0, left));
-
-        return _EscapeJsonString(tags.join(','));
+      if (this.processedHeading !== undefined) {
+        templSource = this.processedHeading;
+        this.processedHeading = undefined;
       } else {
-        // The heading contains only a reading, so we make this reading a tag.
-
-        // Some readings might contain Kanji with their readings enclosed in
-        // full width parentheses (WTF, this is a reading for God's sake).
-        // We should strip these readings to produce valid tags.
-        return this._StripChunksEnclosedInParentheses(heading);
+        // TODO: Might be a good idea to make ProcessHeading() to look for
+        // cached result.
+        print('Entering a slow processing path in ProcessTags function. ' +
+              'Please consider calling ' +
+              'Dictionary::SearchResults::FetchHeading() before calling ' +
+              'Dictionary::SearchResults::FetchTags().');
+        templSource = this.ProcessHeading();
       }
-    } else {
-      return '';
+
+      if (templSource !== null) {
+        var left;
+
+        // If we have some templates- permute them and produce tags.
+        if (templSource[templSource.length - 1] == '】' &&
+            (left = templSource.indexOf('【')) != -1) {
+          // Strip the part describing the origin language of the word in
+          // the heading.
+          templSource = templSource.replace(stripLangRe, '【');
+
+          var tags = [];
+          var templates =
+            templSource.slice(left + 1, templSource.length - 1).split('・');
+
+          // Permute each tag template. A tag template might contain a part that
+          // can be optionally removed or inserted (a text inclosed into（）).
+          // We should permute each template and produce real tags.
+          for (var i = 0; i < templates.length; i++) {
+            this._PermuteWord(templates[i], tags);
+          }
+
+          // XXX: Push the reading into tags as well. Might be useful,
+          // but I'm not sure.
+          tags.push(templSource.slice(0, left));
+
+          return _EscapeJsonString(tags.join(','));
+        } else {
+          // The heading contains only a reading, so we make this reading a tag.
+
+          // Some readings might contain Kanji with their readings enclosed in
+          // full width parentheses (WTF, this is a reading for God's sake).
+          // We should strip these readings to produce valid tags.
+          return this._StripChunksEnclosedInParentheses(heading);
+        }
+      } else {
+        return '';
+      }
     }
-  }
+  })()
 };
 
 // ====================================================================
@@ -958,13 +598,13 @@ function Newline() {
   return '␊';
 }
 
-//function Indent() {
-//  return '';
-//}
+function Indent() {
+  return '';
+}
 
 function InsertHeadingGaiji(gaijiCode) {
   var result = gaijiMap[gaijiCode];
-  return result ? result : '&lt;0x' + gaijiCode.toString(16) + '&gt;';
+  return result ? result : '?';
 }
 
 function InsertTextGaiji(gaijiCode) {
