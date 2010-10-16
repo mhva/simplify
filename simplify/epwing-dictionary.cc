@@ -1482,7 +1482,7 @@ static EB_Error_Code HandleEndReference(EB_Book *book, EB_Appendix *,
 
     return WriteJs(book,
                    reinterpret_cast<HookContext *>(arg),
-                   JsFunction::Indent,
+                   JsFunction::EndReference,
                    sizeof(v8argv) / sizeof(v8argv[0]),
                    v8argv);
 }
