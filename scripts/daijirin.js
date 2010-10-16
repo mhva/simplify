@@ -275,7 +275,7 @@ TextProcessor.prototype = {
   })(),
 
   _DecorateSpecialSections: (function() {
-    var matchSpecialSectionsRe = /［(可能|慣用)］(.*?)(␊|$)/g;
+    var matchSpecialSectionsRe = /［(可能|慣用|派生)］(.*?)(␊|$)/g;
     var matchHasetsuRe = /〔(.*?)〕␊?/g
 
     var Decorate = function(name, text) {
