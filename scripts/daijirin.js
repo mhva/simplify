@@ -516,17 +516,23 @@ HeadingProcessor.prototype = {
   })(),
 
   ProcessHeading: (function() {
-    var matchHiraganaKatakanaRe = /[あ-ヺ]/;
+    var matchWaEiEntryRe = /（和英）$/;
 
     return function(heading) {
-      heading = this._StripGarbageChars(heading);
+      // Exclude WaEi entries.
+      if (!matchWaEiEntryRe.test(heading)) {
+        heading = this._StripGarbageChars(heading);
 
-      // HACK: Save the result so the ProcessTags can later pick it up and
-      // avoid burning unneccessary CPU cycles.
-      this.processedHeading = heading;
+        // HACK: Save the result so the ProcessTags can later pick it up and
+        // avoid burning unneccessary CPU cycles.
+        this.processedHeading = heading;
 
-      heading = this._TranslateFullWidthLatin(heading);
-      return _EscapeJsonString(heading);
+        heading = this._TranslateFullWidthLatin(heading);
+        return _EscapeJsonString(heading);
+      } else {
+        this.processedHeading = null;
+        return null;
+      }
     };
   })(),
 
@@ -576,10 +582,11 @@ HeadingProcessor.prototype = {
 
           return _EscapeJsonString(tags.join(','));
         } else {
-          // The heading contains only a reading, so we make this reading a tag.
+          // The heading contains only a reading, so we return this reading
+          // as tag.
 
           // Some readings might contain Kanji with their readings enclosed in
-          // full width parentheses (WTF, this is a reading for God's sake).
+          // full-width parentheses (WTF, this is a reading for God's sake).
           // We should strip these readings to produce valid tags.
           return this._StripChunksEnclosedInParentheses(heading);
         }
