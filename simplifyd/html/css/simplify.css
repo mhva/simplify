@@ -139,7 +139,7 @@ body {
   height: 100%;
   padding: 0 3px 0 0;
   -webkit-box-sizing: border-box;
-  line-height: 1.4em !important;
+  line-height: 1.5em !important;
 }
 
 .overlay > .overlay-content::-webkit-scrollbar {
@@ -274,5 +274,17 @@ body {
   display: table-cell;
   padding-left: 1em;
   font-size: 10pt;
-  line-height: 1.4em;
+}
+
+.a-bln2 {
+  color: #eee;
+  background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#606c88), color-stop(100%,#3f4c6b));
+  -webkit-border-radius: 1em;
+  margin-right: 5px;
+}
+
+.a-bln1 {
+  color: #eee;
+  background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#a4b357), color-stop(100%,#75890c));
+  -webkit-border-radius: 4px;
 }
