@@ -328,7 +328,7 @@ TextProcessor.prototype = {
       return privateRanges.lv2.MapToChar(delta);
     };
 
-    var replaceLv3Re = /（([アイウエオカキクケコサシ])）/g;
+    var replaceLv3Re = /（([アイウエオ])）/g;
     var lv3NumberMap = {
       'ア': 1,
       'イ': 2,
