@@ -187,8 +187,35 @@ TextProcessor.prototype = {
     };
   })(),
 
+  _DecorateExamples: (function() {
+    var matchExampleRe = /「(.*?)」/g;
+    var replaceFun = function($0, $1) {
+      var examples = $1.split('／');
+
+      if (examples.length > 1) {
+        var html = ['<div style="margin-left: 1.3em">'];
+        for (var i = 0; i < examples.length; i++) {
+          html.push('<div class="a-li"><span class="a-ln">');
+          html.push((i + 1).toString());
+          html.push('</span><span class="a-lt">');
+          html.push(examples[i]);
+          html.push('</span></div>');
+        }
+        html.push('</div>');
+        return html.join('');
+      } else {
+        return $0;
+      }
+    };
+
+    return function(text) {
+      return text.replace(matchExampleRe, replaceFun);
+    };
+  })(),
+
   ProcessText: function(text) {
     text = this._DecorateTitle(text);
+    text = this._DecorateExamples(text);
     text = this._DecorateListNumbers(text);
 
     return _EscapeJsonString(text);
