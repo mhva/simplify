@@ -86,9 +86,6 @@ body {
   padding: 0 0 0 25px;
   line-height: 1.4em;
   -webkit-box-sizing: border-box;
-
-  /* For some reason webkit loses this setting on hover */
-  text-rendering: optimizeLegibility !important;
 }
 
 .search-result-container > .result-count {
@@ -103,17 +100,17 @@ body {
 }
 
 .search-result-container, .article-container {
-  text-rendering: optimizeLegibility !important;
   font-family: 'Droid Serif',IPAMincho,serif;
   font-size: 13pt;
 }
 
 .article-container {
   padding: 1em 2em 0 2em;
-  line-height: 1.4em !important;
+  line-height: 1.5em !important;
 }
 
 .article-title {
+  text-rendering: optimizeLegibility;
   font-size: 1.5em;
   font-weight: bold;
   margin-bottom: 1em;
@@ -130,7 +127,6 @@ body {
   -webkit-box-shadow: 0 1px 30px rgba(0,0,0,.6);
   -webkit-border-radius: 6px;
   -webkit-box-sizing: border-box;
-  text-rendering: optimizeLegibility !important;
 }
 
 .overlay > .overlay-content {
@@ -139,7 +135,7 @@ body {
   height: 100%;
   padding: 0 3px 0 0;
   -webkit-box-sizing: border-box;
-  line-height: 1.5em !important;
+  line-height: 1.4em !important;
 }
 
 .overlay > .overlay-content::-webkit-scrollbar {
@@ -172,6 +168,10 @@ body {
   display: block;
   height: 100%;
   color: #fff;
+}
+
+.overlay .a-bln1, .overlay .a-bln2 {
+  padding: 1px 0 1px 0;
 }
 
 .overlay .overlay-results > .result-count {
@@ -276,15 +276,15 @@ body {
   font-size: 10pt;
 }
 
+.a-bln1 {
+  color: #eee;
+  background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#a4b357), color-stop(100%,#75890c));
+  -webkit-border-radius: 4px;
+}
+
 .a-bln2 {
   color: #eee;
   background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#606c88), color-stop(100%,#3f4c6b));
   -webkit-border-radius: 1em;
   margin-right: 5px;
-}
-
-.a-bln1 {
-  color: #eee;
-  background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#a4b357), color-stop(100%,#75890c));
-  -webkit-border-radius: 4px;
 }
