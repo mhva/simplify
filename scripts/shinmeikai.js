@@ -217,6 +217,7 @@ TextProcessor.prototype = {
     text = this._DecorateTitle(text);
     text = this._DecorateExamples(text);
     text = this._DecorateListNumbers(text);
+    text = _LinkifyReferences(text);
 
     return _EscapeJsonString(text);
   }
@@ -417,29 +418,6 @@ function InsertTextGaiji(gaijiCode) {
   var result = gaijiMap[gaijiCode];
   return result !== undefined ? result
                               : '&lt;0x' + gaijiCode.toString(16) + '&gt;';
-}
-
-function BeginKeyword() {
-  // Keywords in DAIJIRIN appear to depict pronunciation of the word in the
-  // article's title.
-  return '';
-  return '&lt;kw&gt;';
-}
-
-function EndKeyword() {
-  return '';
-  return '&lt;/kw&gt;';
-}
-
-function BeginReference() {
-  // Keywords in DAIJIRIN appear to depict pronunciation of the word in the
-  // article's title.
-  return '';
-  return '&lt;REF&gt;';
-}
-
-function EndReference() {
-  return '';
 }
 
 (function() {

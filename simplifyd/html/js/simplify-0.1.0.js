@@ -490,6 +490,7 @@ ArticleWidget.prototype = MergePrototype({
       $('<div class="' + (conf.containerClass || 'article') + '"></div>');
     $(parent).append(this._containerDom);
 
+    $(this._containerDom).bind('click', {self:this}, this._handleClick);
     $(this._containerDom).bind('mouseup', {self:this}, this._handleMouseUp);
     $(window).bind('keydown', {self:this}, this._handleKeyDown);
     $(window).bind('keyup', {self:this}, this._handleKeyUp);
@@ -504,6 +505,13 @@ ArticleWidget.prototype = MergePrototype({
   _handleKeyUp: function(event) {
     if (event.keyCode == 17 || event.keyCode == 91) {
       event.data.self._discardLookup = false;
+    }
+  },
+
+  _handleClick: function(event) {
+    if ($(event.target).hasClass('a-ref')) {
+      event.preventDefault();
+      event.data.self.trigger('replaceArticle', [$(event.target).attr('href')]);
     }
   },
 

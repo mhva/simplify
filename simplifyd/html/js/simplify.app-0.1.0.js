@@ -191,6 +191,19 @@ SearchAction.prototype = MergePrototype({
     }, 0);
   }
 
+  function handleReplaceArticleEvent(guid) {
+    var tabIndex = tabWidget.getIndex();
+    var searchQuery =
+      tabContexts[tabWidget.getIndex()].searchAction.searchQuery();
+
+    $.bbq.pushState({
+      'do'  : 'article',
+      'ti'  : tabIndex,
+      'q'   : searchQuery,
+      'guid': guid
+    }, 2);
+  }
+
   function createOverlayWidget() {
     overlayWidget = new OverlayArticleWidget($('body'), {
       constraintElement: $('#content')[0]
@@ -215,6 +228,7 @@ SearchAction.prototype = MergePrototype({
       };
 
       awidget.bind('inlineLookup', handleInlineLookupEvent);
+      awidget.bind('replaceArticle', handleReplaceArticleEvent);
       srwidget.bind('openArticle', handleOpenArticleEvent);
 
       var restoreScrollFun = function() {

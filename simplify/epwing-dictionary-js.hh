@@ -36,6 +36,17 @@ u8R"#(
       };
     })();
 
+    _LinkifyReferences = (function() {
+      var matchRefRe = /〘(.+?)\|(\d+?:\d+?)〙/g;
+      var replaceFun = function($0, $1, $2) {
+        return '<a class="a-ref" href="' + $2 + '">' + $1 + '</a>';
+      };
+
+      return function(text) {
+        return text.replace(matchRefRe, replaceFun);
+      };
+    })();
+
     function _BeginSubscript() {
         return '<sub>';
     }
@@ -77,11 +88,11 @@ u8R"#(
     }
 
     function _BeginReference() {
-        return '';
+        return '〘';
     }
 
     function _EndReference(page, offset) {
-        return '';
+        return '|' + page + ':' + offset + '〙';
     }
 
     function _BeginKeyword() {

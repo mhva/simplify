@@ -385,6 +385,7 @@ TextProcessor.prototype = {
   })(),
 
   ProcessText: function(text) {
+    text = _LinkifyReferences(text);
     text = this._ReplaceCompositions(text);
     text = this._EscapeInTextReferences(text);
     text = this._DecorateSpecialSections(text);
