@@ -148,7 +148,9 @@ var gaijiMap = {
   0xc455: '(文)',
   0xa330: 'ū',
   0xa224: 'ā',
-  0xa36d: 'ī'
+  0xa36d: 'ī',
+  0xbc2c: '⚬',
+  0xb436: '⚬'
 };
 
 var articleGaijiRanges = {
