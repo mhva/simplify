@@ -80,6 +80,7 @@ Daemon that serves search and browse requests from Simplify applications.
 static void PrintHelpAndExit()
 {
     std::cout << g_daemon_help << std::endl;
+    exit(0);
 }
 
 static bool ParseCommandLine(int argc, char *argv[],
