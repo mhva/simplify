@@ -18,7 +18,7 @@
    Fifth Floor, Boston, MA 02110-1301, USA.
 */
 
-#ifdef POSIX
+#ifdef SIMPLIFY_POSIX
 # include <errno.h>
 # include <sys/types.h>
 # include <sys/stat.h>
@@ -99,7 +99,7 @@ Likely<Dictionary *> Repository::NewDictionary(const char *name,
 
     std::string dict_dir = repository_path_ + "/" + name;
 
-#if defined(POSIX)
+#if defined(SIMPLIFY_POSIX)
     // Ensure that we are not going to overwrite an existing dictionary by
     // checking whether configuration file exists or not.
     if (access((dict_dir + "/config").c_str(), F_OK) != 0) {
@@ -170,7 +170,7 @@ void Repository::DeleteDictionary(Dictionary *dict)
     delete dict;
 
     // Remove configuration file and enclosing directory if it's empty.
-#ifdef POSIX
+#ifdef SIMPLIFY_POSIX
     unlink(config_file.c_str());
     rmdir(dict_dir.c_str());
 #else
@@ -226,7 +226,7 @@ DictionaryType Repository::IdentifyDictionary(const char *path)
 
 Likely<Repository *> Repository::New(const char *repository_path)
 {
-#ifdef POSIX
+#ifdef SIMPLIFY_POSIX
     DIR *dir = opendir(repository_path);
 
     if (dir == NULL)

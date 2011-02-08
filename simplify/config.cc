@@ -29,7 +29,7 @@
 
 #include <typeinfo>
 
-#ifdef POSIX
+#ifdef SIMPLIFY_POSIX
 # include <unistd.h>
 #endif
 
@@ -37,7 +37,6 @@
 #include "likely.hh"
 #include "utils.hh"
 
-#include "config.h"
 #include "config.hh"
 
 namespace simplify {
@@ -309,7 +308,7 @@ std::string Config::GetFileName() const
 
 std::string Config::GetEnclosingDirectory() const
 {
-#if defined(POSIX)
+#if defined(SIMPLIFY_POSIX)
     size_t slash_offset = filename_.rfind('/');
     assert(slash_offset != std::string::npos);
 
@@ -327,7 +326,7 @@ std::error_code Config::Flush()
 {
     std::string tmp_filename;
 
-#if defined(POSIX)
+#if defined(SIMPLIFY_POSIX)
     // On POSIX systems we write to backup file to later use atomic replace
     // after we've finised writing to guarantee that the config file is always
     // consistent.
@@ -375,7 +374,7 @@ std::error_code Config::Flush()
     if (fflush(file) == EOF)
         goto error_cleanup;
 
-#ifdef POSIX
+#ifdef SIMPLIFY_POSIX
     // Do an atomic replace to guarantee consistency.
 
     // XXX: On Mac OS X fsync() doesn't block until all data has been flushed

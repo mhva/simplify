@@ -32,8 +32,6 @@
 
 #include <simplify/repository.hh>
 
-#include <config.h>
-
 #include "articleaction.hh"
 #include "contextaction.hh"
 #include "searchaction.hh"
@@ -63,12 +61,12 @@ Daemon that serves search and browse requests from Simplify applications.
       Root directory of the repository from where dictionaries should
       be loaded. If the specified directory does not exist, program will
       attempt to create it.
-      Default: ${HOME}/)#" REPOSITORY_SUFFIX R"#(.
+      Default: ${HOME}/)#" SIMPLIFY_CONFIG_PATH R"#(/repository.
 
   -d HTML-DIR, --html-dir HTML-DIR
       Root directory of the web server. The web server uses this directory
       to serve web resources (html files, images, css stylesheets, etc.).
-      Default: )#" WWW_ROOT R"#(
+      Default: )#" SIMPLIFY_WWWROOT R"#(
 
   -b, --background
       Detach and run in background. Default: Run in foreground.
@@ -134,15 +132,20 @@ static bool ParseCommandLine(int argc, char *argv[],
 
     // Set defaults if nothing were specified on the command line.
     if (!*repository_path) {
+        const char *suffix = "repository";
         char *home = getenv("HOME");
-        size_t size = strlen(home) + strlen(REPOSITORY_SUFFIX) + 2;
+        size_t size = strlen(home) +
+                      strlen(SIMPLIFY_CONFIG_PATH) +
+                      sizeof(suffix) + 3;
 
         *repository_path = static_cast<char *>(malloc(size));
-        sprintf(*repository_path, "%s/%s", home, REPOSITORY_SUFFIX);
+
+        sprintf(*repository_path, "%s/%s/%s",
+                home, SIMPLIFY_CONFIG_PATH, suffix);
     }
 
     if (!*html_dir)
-        *html_dir = strdup(WWW_ROOT);
+        *html_dir = strdup(SIMPLIFY_WWWROOT);
 
     return true;
 }
