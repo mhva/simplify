@@ -288,12 +288,11 @@ SearchAction.prototype = MergePrototype({
   $.simplify.dispatch = function(params) {
     var tabIndex = parseInt(params.ti);
     var query = params.q;
+    var queryEdit = $('#query-edit');
 
-    with ($('#query-edit')) {
-      setText(query || '', true);
-      focus();
-      select();
-    }
+    queryEdit.setText(query || '', true);
+    queryEdit.focus()
+    queryEdit.select();
 
     switch (params.do) {
       case 'article':
