@@ -34,6 +34,7 @@
 #include "frames-inl.h"
 #include "hashmap.h"
 #include "log-inl.h"
+#include "vm-state-inl.h"
 
 #include "../include/v8-profiler.h"
 
@@ -46,7 +47,8 @@ static const int kTickSamplesBufferChunksCount = 16;
 
 
 ProfilerEventsProcessor::ProfilerEventsProcessor(ProfileGenerator* generator)
-    : generator_(generator),
+    : Thread("v8:ProfEvntProc"),
+      generator_(generator),
       running_(true),
       ticks_buffer_(sizeof(TickSampleEventRecord),
                     kTickSamplesBufferChunkSize,
@@ -188,6 +190,20 @@ bool ProfilerEventsProcessor::IsKnownFunction(Address start) {
 }
 
 
+void ProfilerEventsProcessor::ProcessMovedFunctions() {
+  for (int i = 0; i < moved_functions_.length(); ++i) {
+    JSFunction* function = moved_functions_[i];
+    CpuProfiler::FunctionCreateEvent(function);
+  }
+  moved_functions_.Clear();
+}
+
+
+void ProfilerEventsProcessor::RememberMovedFunction(JSFunction* function) {
+  moved_functions_.Add(function);
+}
+
+
 void ProfilerEventsProcessor::RegExpCodeCreateEvent(
     Logger::LogEventsAndTags tag,
     const char* prefix,
@@ -209,7 +225,7 @@ void ProfilerEventsProcessor::RegExpCodeCreateEvent(
 void ProfilerEventsProcessor::AddCurrentStack() {
   TickSampleEventRecord record;
   TickSample* sample = &record.sample;
-  sample->state = VMState::current_state();
+  sample->state = Top::current_vm_state();
   sample->pc = reinterpret_cast<Address>(sample);  // Not NULL.
   sample->frames_count = 0;
   for (StackTraceFrameIterator it;
@@ -300,6 +316,7 @@ void ProfilerEventsProcessor::Run() {
 
 
 CpuProfiler* CpuProfiler::singleton_ = NULL;
+Atomic32 CpuProfiler::is_profiling_ = false;
 
 void CpuProfiler::StartProfiling(const char* title) {
   ASSERT(singleton_ != NULL);
@@ -421,13 +438,17 @@ void CpuProfiler::FunctionCreateEvent(JSFunction* function) {
   }
   singleton_->processor_->FunctionCreateEvent(
       function->address(),
-      function->code()->address(),
+      function->shared()->code()->address(),
       security_token_id);
 }
 
 
-void CpuProfiler::FunctionCreateEventFromMove(JSFunction* function,
-                                              HeapObject* source) {
+void CpuProfiler::ProcessMovedFunctions() {
+  singleton_->processor_->ProcessMovedFunctions();
+}
+
+
+void CpuProfiler::FunctionCreateEventFromMove(JSFunction* function) {
   // This function is called from GC iterators (during Scavenge,
   // MC, and MS), so marking bits can be set on objects. That's
   // why unchecked accessors are used here.
@@ -436,27 +457,7 @@ void CpuProfiler::FunctionCreateEventFromMove(JSFunction* function,
   if (function->unchecked_code() == Builtins::builtin(Builtins::LazyCompile)
       || singleton_->processor_->IsKnownFunction(function->address())) return;
 
-  int security_token_id = TokenEnumerator::kNoSecurityToken;
-  // In debug mode, assertions may fail for contexts,
-  // and we can live without security tokens in debug mode.
-#ifndef DEBUG
-  if (function->unchecked_context()->IsContext()) {
-    security_token_id = singleton_->token_enumerator_->GetTokenId(
-        function->context()->global_context()->security_token());
-  }
-  // Security token may not be moved yet.
-  if (security_token_id == TokenEnumerator::kNoSecurityToken) {
-    JSFunction* old_function = reinterpret_cast<JSFunction*>(source);
-    if (old_function->unchecked_context()->IsContext()) {
-      security_token_id = singleton_->token_enumerator_->GetTokenId(
-          old_function->context()->global_context()->security_token());
-    }
-  }
-#endif
-  singleton_->processor_->FunctionCreateEvent(
-      function->address(),
-      function->unchecked_code()->address(),
-      security_token_id);
+  singleton_->processor_->RememberMovedFunction(function);
 }
 
 
@@ -527,6 +528,7 @@ void CpuProfiler::StartProcessorIfNotStarted() {
     Logger::logging_nesting_ = 0;
     generator_ = new ProfileGenerator(profiles_);
     processor_ = new ProfilerEventsProcessor(generator_);
+    NoBarrier_Store(&is_profiling_, true);
     processor_->Start();
     // Enumerate stuff we already have in the heap.
     if (Heap::HasBeenSetup()) {
@@ -541,7 +543,9 @@ void CpuProfiler::StartProcessorIfNotStarted() {
       Logger::LogAccessorCallbacks();
     }
     // Enable stack sampling.
-    reinterpret_cast<Sampler*>(Logger::ticker_)->Start();
+    Sampler* sampler = reinterpret_cast<Sampler*>(Logger::ticker_);
+    if (!sampler->IsActive()) sampler->Start();
+    sampler->IncreaseProfilingDepth();
   }
 }
 
@@ -572,12 +576,15 @@ CpuProfile* CpuProfiler::StopCollectingProfile(Object* security_token,
 
 void CpuProfiler::StopProcessorIfLastProfile(const char* title) {
   if (profiles_->IsLastProfile(title)) {
-    reinterpret_cast<Sampler*>(Logger::ticker_)->Stop();
+    Sampler* sampler = reinterpret_cast<Sampler*>(Logger::ticker_);
+    sampler->DecreaseProfilingDepth();
+    sampler->Stop();
     processor_->Stop();
     processor_->Join();
     delete processor_;
     delete generator_;
     processor_ = NULL;
+    NoBarrier_Store(&is_profiling_, false);
     generator_ = NULL;
     Logger::logging_nesting_ = saved_logging_nesting_;
   }

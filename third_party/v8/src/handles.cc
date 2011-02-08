@@ -37,14 +37,16 @@
 #include "global-handles.h"
 #include "natives.h"
 #include "runtime.h"
+#include "string-search.h"
 #include "stub-cache.h"
+#include "vm-state-inl.h"
 
 namespace v8 {
 namespace internal {
 
 
 v8::ImplementationUtilities::HandleScopeData HandleScope::current_ =
-    { -1, NULL, NULL };
+    { NULL, NULL, 0 };
 
 
 int HandleScope::NumberOfHandles() {
@@ -61,7 +63,7 @@ Object** HandleScope::Extend() {
   ASSERT(result == current_.limit);
   // Make sure there's at least one scope on the stack and that the
   // top of the scope stack isn't a barrier.
-  if (current_.extensions < 0) {
+  if (current_.level == 0) {
     Utils::ReportApiFailure("v8::HandleScope::CreateHandle()",
                             "Cannot create a handle without a HandleScope");
     return NULL;
@@ -73,6 +75,7 @@ Object** HandleScope::Extend() {
     Object** limit = &impl->blocks()->last()[kHandleBlockSize];
     if (current_.limit != limit) {
       current_.limit = limit;
+      ASSERT(limit - current_.next < kHandleBlockSize);
     }
   }
 
@@ -84,7 +87,6 @@ Object** HandleScope::Extend() {
     // Add the extension to the global list of blocks, but count the
     // extension as part of the current scope.
     impl->blocks()->Add(result);
-    current_.extensions++;
     current_.limit = &result[kHandleBlockSize];
   }
 
@@ -93,21 +95,20 @@ Object** HandleScope::Extend() {
 
 
 void HandleScope::DeleteExtensions() {
-  ASSERT(current_.extensions != 0);
-  HandleScopeImplementer::instance()->DeleteExtensions(current_.extensions);
+  HandleScopeImplementer::instance()->DeleteExtensions(current_.limit);
 }
 
 
 void HandleScope::ZapRange(Object** start, Object** end) {
-  if (start == NULL) return;
-  for (Object** p = start; p < end; p++) {
+  ASSERT(end - start <= kHandleBlockSize);
+  for (Object** p = start; p != end; p++) {
     *reinterpret_cast<Address*>(p) = v8::internal::kHandleZapValue;
   }
 }
 
 
-Address HandleScope::current_extensions_address() {
-  return reinterpret_cast<Address>(&current_.extensions);
+Address HandleScope::current_level_address() {
+  return reinterpret_cast<Address>(&current_.level);
 }
 
 
@@ -143,7 +144,7 @@ Handle<JSGlobalProxy> ReinitializeJSGlobalProxy(
 
 void SetExpectedNofProperties(Handle<JSFunction> func, int nof) {
   // If objects constructed from this function exist then changing
-  // 'estimated_nof_properties' is dangerous since the previois value might
+  // 'estimated_nof_properties' is dangerous since the previous value might
   // have been compiled into the fast construct stub. More over, the inobject
   // slack tracking logic might have adjusted the previous value, so even
   // passing the same value is risky.
@@ -210,19 +211,21 @@ void TransformToFastProperties(Handle<JSObject> object,
 }
 
 
+void NumberDictionarySet(Handle<NumberDictionary> dictionary,
+                         uint32_t index,
+                         Handle<Object> value,
+                         PropertyDetails details) {
+  CALL_HEAP_FUNCTION_VOID(dictionary->Set(index, *value, details));
+}
+
+
 void FlattenString(Handle<String> string) {
   CALL_HEAP_FUNCTION_VOID(string->TryFlatten());
 }
 
 
 Handle<String> FlattenGetString(Handle<String> string) {
-  Handle<String> result;
-  CALL_AND_RETRY(string->TryFlatten(),
-                 { result = Handle<String>(String::cast(__object__));
-                   break; },
-                 return Handle<String>());
-  ASSERT(string->IsFlat());
-  return result;
+  CALL_HEAP_FUNCTION(string->TryFlatten(), String);
 }
 
 
@@ -277,13 +280,13 @@ Handle<Object> ForceDeleteProperty(Handle<JSObject> object,
 }
 
 
-Handle<Object> IgnoreAttributesAndSetLocalProperty(
+Handle<Object> SetLocalPropertyIgnoreAttributes(
     Handle<JSObject> object,
     Handle<String> key,
     Handle<Object> value,
     PropertyAttributes attributes) {
   CALL_HEAP_FUNCTION(object->
-      IgnoreAttributesAndSetLocalProperty(*key, *value, attributes), Object);
+      SetLocalPropertyIgnoreAttributes(*key, *value, attributes), Object);
 }
 
 
@@ -419,6 +422,15 @@ Handle<Object> SetElement(Handle<JSObject> object,
 }
 
 
+Handle<Object> SetOwnElement(Handle<JSObject> object,
+                             uint32_t index,
+                             Handle<Object> value) {
+  ASSERT(!object->HasPixelElements());
+  ASSERT(!object->HasExternalArrayElements());
+  CALL_HEAP_FUNCTION(object->SetElement(index, *value, false), Object);
+}
+
+
 Handle<JSObject> Copy(Handle<JSObject> obj) {
   CALL_HEAP_FUNCTION(Heap::CopyJSObject(*obj), JSObject);
 }
@@ -492,48 +504,59 @@ void InitScriptLineEnds(Handle<Script> script) {
 
   Handle<FixedArray> array = CalculateLineEnds(src, true);
 
+  if (*array != Heap::empty_fixed_array()) {
+    array->set_map(Heap::fixed_cow_array_map());
+  }
+
   script->set_line_ends(*array);
   ASSERT(script->line_ends()->IsFixedArray());
 }
 
 
-Handle<FixedArray> CalculateLineEnds(Handle<String> src,
-                                     bool with_imaginary_last_new_line) {
-  const int src_len = src->length();
-  Handle<String> new_line = Factory::NewStringFromAscii(CStrVector("\n"));
+template <typename SourceChar>
+static void CalculateLineEnds(List<int>* line_ends,
+                              Vector<const SourceChar> src,
+                              bool with_last_line) {
+  const int src_len = src.length();
+  StringSearch<char, SourceChar> search(CStrVector("\n"));
 
-  // Pass 1: Identify line count.
-  int line_count = 0;
+  // Find and record line ends.
   int position = 0;
   while (position != -1 && position < src_len) {
-    position = Runtime::StringMatch(src, new_line, position);
+    position = search.Search(src, position);
     if (position != -1) {
+      line_ends->Add(position);
       position++;
-    }
-    if (position != -1) {
-      line_count++;
-    } else if (with_imaginary_last_new_line) {
+    } else if (with_last_line) {
       // Even if the last line misses a line end, it is counted.
-      line_count++;
+      line_ends->Add(src_len);
+      return;
     }
   }
+}
 
-  // Pass 2: Fill in line ends positions
+
+Handle<FixedArray> CalculateLineEnds(Handle<String> src,
+                                     bool with_last_line) {
+  src = FlattenGetString(src);
+  // Rough estimate of line count based on a roughly estimated average
+  // length of (unpacked) code.
+  int line_count_estimate = src->length() >> 4;
+  List<int> line_ends(line_count_estimate);
+  {
+    AssertNoAllocation no_heap_allocation;  // ensure vectors stay valid.
+    // Dispatch on type of strings.
+    if (src->IsAsciiRepresentation()) {
+      CalculateLineEnds(&line_ends, src->ToAsciiVector(), with_last_line);
+    } else {
+      CalculateLineEnds(&line_ends, src->ToUC16Vector(), with_last_line);
+    }
+  }
+  int line_count = line_ends.length();
   Handle<FixedArray> array = Factory::NewFixedArray(line_count);
-  int array_index = 0;
-  position = 0;
-  while (position != -1 && position < src_len) {
-    position = Runtime::StringMatch(src, new_line, position);
-    if (position != -1) {
-      array->set(array_index++, Smi::FromInt(position++));
-    } else if (with_imaginary_last_new_line) {
-      // If the script does not end with a line ending add the final end
-      // position as just past the last line ending.
-      array->set(array_index++, Smi::FromInt(src_len));
-    }
+  for (int i = 0; i < line_count; i++) {
+    array->set(i, Smi::FromInt(line_ends[i]));
   }
-  ASSERT(array_index == line_count);
-
   return array;
 }
 
@@ -545,11 +568,11 @@ int GetScriptLineNumber(Handle<Script> script, int code_pos) {
   FixedArray* line_ends_array = FixedArray::cast(script->line_ends());
   const int line_ends_len = line_ends_array->length();
 
-  if (!line_ends_len)
-    return -1;
+  if (!line_ends_len) return -1;
 
-  if ((Smi::cast(line_ends_array->get(0)))->value() >= code_pos)
+  if ((Smi::cast(line_ends_array->get(0)))->value() >= code_pos) {
     return script->line_offset()->value();
+  }
 
   int left = 0;
   int right = line_ends_len;
@@ -784,7 +807,7 @@ bool EnsureCompiled(Handle<SharedFunctionInfo> shared,
 static bool CompileLazyHelper(CompilationInfo* info,
                               ClearExceptionFlag flag) {
   // Compile the source information to a code object.
-  ASSERT(!info->shared_info()->is_compiled());
+  ASSERT(info->IsOptimizing() || !info->shared_info()->is_compiled());
   bool result = Compiler::CompileLazy(info);
   ASSERT(result != Top::has_pending_exception());
   if (!result && flag == CLEAR_EXCEPTION) Top::clear_pending_exception();
@@ -801,36 +824,47 @@ bool CompileLazyShared(Handle<SharedFunctionInfo> shared,
 
 bool CompileLazy(Handle<JSFunction> function,
                  ClearExceptionFlag flag) {
+  bool result = true;
   if (function->shared()->is_compiled()) {
-    function->set_code(function->shared()->code());
-    PROFILE(FunctionCreateEvent(*function));
+    function->ReplaceCode(function->shared()->code());
     function->shared()->set_code_age(0);
-    return true;
   } else {
     CompilationInfo info(function);
-    bool result = CompileLazyHelper(&info, flag);
+    result = CompileLazyHelper(&info, flag);
     ASSERT(!result || function->is_compiled());
-    PROFILE(FunctionCreateEvent(*function));
-    return result;
   }
+  if (result && function->is_compiled()) {
+    PROFILE(FunctionCreateEvent(*function));
+  }
+  return result;
 }
 
 
 bool CompileLazyInLoop(Handle<JSFunction> function,
                        ClearExceptionFlag flag) {
+  bool result = true;
   if (function->shared()->is_compiled()) {
-    function->set_code(function->shared()->code());
-    PROFILE(FunctionCreateEvent(*function));
+    function->ReplaceCode(function->shared()->code());
     function->shared()->set_code_age(0);
-    return true;
   } else {
     CompilationInfo info(function);
     info.MarkAsInLoop();
-    bool result = CompileLazyHelper(&info, flag);
+    result = CompileLazyHelper(&info, flag);
     ASSERT(!result || function->is_compiled());
-    PROFILE(FunctionCreateEvent(*function));
-    return result;
   }
+  if (result && function->is_compiled()) {
+    PROFILE(FunctionCreateEvent(*function));
+  }
+  return result;
+}
+
+
+bool CompileOptimized(Handle<JSFunction> function, int osr_ast_id) {
+  CompilationInfo info(function);
+  info.SetOptimizing(osr_ast_id);
+  bool result = CompileLazyHelper(&info, KEEP_EXCEPTION);
+  if (result) PROFILE(FunctionCreateEvent(*function));
+  return result;
 }
 
 
@@ -839,7 +873,7 @@ OptimizedObjectForAddingMultipleProperties(Handle<JSObject> object,
                                            int expected_additional_properties,
                                            bool condition) {
   object_ = object;
-  if (condition && object_->HasFastProperties()) {
+  if (condition && object_->HasFastProperties() && !object->IsJSGlobalProxy()) {
     // Normalize the properties of object to avoid n^2 behavior
     // when extending the object multiple properties. Indicate the number of
     // properties to be added.

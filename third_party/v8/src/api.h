@@ -31,6 +31,8 @@
 #include "apiutils.h"
 #include "factory.h"
 
+#include "../include/v8-testing.h"
+
 namespace v8 {
 
 // Constants used in the implementation of the API.  The most natural thing
@@ -353,7 +355,7 @@ class HandleScopeImplementer {
 
 
   inline internal::Object** GetSpareOrNewBlock();
-  inline void DeleteExtensions(int extensions);
+  inline void DeleteExtensions(internal::Object** prev_limit);
 
   inline void IncrementCallDepth() {call_depth_++;}
   inline void DecrementCallDepth() {call_depth_--;}
@@ -465,26 +467,41 @@ internal::Object** HandleScopeImplementer::GetSpareOrNewBlock() {
 }
 
 
-void HandleScopeImplementer::DeleteExtensions(int extensions) {
-  if (spare_ != NULL) {
-    DeleteArray(spare_);
-    spare_ = NULL;
-  }
-  for (int i = extensions; i > 1; --i) {
-    internal::Object** block = blocks_.RemoveLast();
+void HandleScopeImplementer::DeleteExtensions(internal::Object** prev_limit) {
+  while (!blocks_.is_empty()) {
+    internal::Object** block_start = blocks_.last();
+    internal::Object** block_limit = block_start + kHandleBlockSize;
 #ifdef DEBUG
-    v8::ImplementationUtilities::ZapHandleRange(block,
-                                                &block[kHandleBlockSize]);
+    // NoHandleAllocation may make the prev_limit to point inside the block.
+    if (block_start <= prev_limit && prev_limit <= block_limit) break;
+#else
+    if (prev_limit == block_limit) break;
 #endif
-    DeleteArray(block);
-  }
-  spare_ = blocks_.RemoveLast();
+
+    blocks_.RemoveLast();
 #ifdef DEBUG
-  v8::ImplementationUtilities::ZapHandleRange(
-      spare_,
-      &spare_[kHandleBlockSize]);
+    v8::ImplementationUtilities::ZapHandleRange(block_start, block_limit);
 #endif
+    if (spare_ != NULL) {
+      DeleteArray(spare_);
+    }
+    spare_ = block_start;
+  }
+  ASSERT((blocks_.is_empty() && prev_limit == NULL) ||
+         (!blocks_.is_empty() && prev_limit != NULL));
 }
+
+
+class Testing {
+ public:
+  static v8::Testing::StressType stress_type() { return stress_type_; }
+  static void set_stress_type(v8::Testing::StressType stress_type) {
+    stress_type_ = stress_type;
+  }
+
+ private:
+  static v8::Testing::StressType stress_type_;
+};
 
 } }  // namespace v8::internal
 

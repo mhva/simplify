@@ -142,7 +142,6 @@ int RegExpMacroAssemblerARM::stack_limit_slack()  {
 
 void RegExpMacroAssemblerARM::AdvanceCurrentPosition(int by) {
   if (by != 0) {
-    Label inside_string;
     __ add(current_input_offset(),
            current_input_offset(), Operand(by * char_size()));
   }
@@ -418,8 +417,8 @@ void RegExpMacroAssemblerARM::CheckNotBackReference(
 
 
 void RegExpMacroAssemblerARM::CheckNotRegistersEqual(int reg1,
-                                                      int reg2,
-                                                      Label* on_not_equal) {
+                                                     int reg2,
+                                                     Label* on_not_equal) {
   __ ldr(r0, register_location(reg1));
   __ ldr(r1, register_location(reg2));
   __ cmp(r0, r1);
@@ -427,7 +426,7 @@ void RegExpMacroAssemblerARM::CheckNotRegistersEqual(int reg1,
 }
 
 
-void RegExpMacroAssemblerARM::CheckNotCharacter(uint32_t c,
+void RegExpMacroAssemblerARM::CheckNotCharacter(unsigned c,
                                                 Label* on_not_equal) {
   __ cmp(current_character(), Operand(c));
   BranchOrBacktrack(ne, on_not_equal);
@@ -443,8 +442,8 @@ void RegExpMacroAssemblerARM::CheckCharacterAfterAnd(uint32_t c,
 }
 
 
-void RegExpMacroAssemblerARM::CheckNotCharacterAfterAnd(uint32_t c,
-                                                        uint32_t mask,
+void RegExpMacroAssemblerARM::CheckNotCharacterAfterAnd(unsigned c,
+                                                        unsigned mask,
                                                         Label* on_not_equal) {
   __ and_(r0, current_character(), Operand(mask));
   __ cmp(r0, Operand(c));
@@ -927,6 +926,19 @@ void RegExpMacroAssemblerARM::ReadStackPointerFromRegister(int reg) {
 }
 
 
+void RegExpMacroAssemblerARM::SetCurrentPositionFromEnd(int by) {
+  Label after_position;
+  __ cmp(current_input_offset(), Operand(-by * char_size()));
+  __ b(ge, &after_position);
+  __ mov(current_input_offset(), Operand(-by * char_size()));
+  // On RegExp code entry (where this operation is used), the character before
+  // the current position is expected to be already loaded.
+  // We have advanced the position, so it's safe to read backwards.
+  LoadCurrentCharacterUnchecked(-1, 1);
+  __ bind(&after_position);
+}
+
+
 void RegExpMacroAssemblerARM::SetRegister(int register_index, int to) {
   ASSERT(register_index >= num_saved_registers_);  // Reserved for positions!
   __ mov(r0, Operand(to));
@@ -1018,7 +1030,7 @@ int RegExpMacroAssemblerARM::CheckStackGuardState(Address* return_address,
   ASSERT(*return_address <=
       re_code->instruction_start() + re_code->instruction_size());
 
-  Object* result = Execution::HandleStackGuardInterrupt();
+  MaybeObject* result = Execution::HandleStackGuardInterrupt();
 
   if (*code_handle != re_code) {  // Return address no longer valid
     int delta = *code_handle - re_code;
