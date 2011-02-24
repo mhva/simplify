@@ -31,6 +31,7 @@
 #include "action.hh"
 #include "httpquery.hh"
 #include "httpresponse.hh"
+#include "options.hh"
 #include "server.hh"
 
 
@@ -59,9 +60,7 @@ void Server::AddRoute(const char *name, Action *action)
     if (it == routes_.end()) {
         routes_.insert(std::make_pair(name, action));
     } else {
-        // Replace the action if the route did already exist.
-        delete (*it).second;
-        (*it).second = action;
+        // TODO: Warn that route with the given name already exists.
     }
 }
 
@@ -74,25 +73,23 @@ void Server::DeleteRoute(const char *name)
     }
 }
 
-bool Server::Start(int port,
-                   const char *repository_dir,
-                   const char *document_root)
+bool Server::Start(const Options &options)
 {
-    // Ensure that only one server is running.
-    assert(g_server_instance == NULL);
+    // Ensure that no other Server instances are running.
+    assert(g_server_instance == NULL || !"Cannot start server twice");
+
     char str_port[21];
+    sprintf(str_port, "%u", options.GetPort());
 
-    sprintf(str_port, "%u", port);
-
-    const char *options[] = {
+    const char *mg_options[] = {
         "listening_ports", str_port,
-        "document_root", document_root,
+        "document_root", options.GetHtmlDir(),
         NULL
     };
 
     // Start receiving requests.
     g_server_instance = this;
-    srv_ = mg_start(&Server::Trampoline, options);
+    srv_ = mg_start(&Server::Trampoline, mg_options);
     g_server_instance = NULL;
 
     if (srv_)
@@ -101,23 +98,20 @@ bool Server::Start(int port,
         return false;
 }
 
-void *Server::Trampoline(mg_event event,
-                         mg_connection *conn,
+void *Server::Trampoline(mg_event event, mg_connection *conn,
                          mg_request_info *req)
 {
     return g_server_instance->Dispatch(event, conn, req) ? conn : NULL;
 }
 
-bool Server::Dispatch(mg_event event,
-                      mg_connection *conn,
+bool Server::Dispatch(mg_event event, mg_connection *conn,
                       mg_request_info *req)
 {
     if (event != MG_NEW_REQUEST)
         return false;
 
-
-    // Find an appropriate action for the given path and let an associated
-    // Action object handle the event.
+    // Find appropriate route for the given path and let an Action object
+    // that's associated with the route handle the event.
     auto it = routes_.find(req->uri);
     if (it != routes_.end()) {
         HttpQuery query(*req);

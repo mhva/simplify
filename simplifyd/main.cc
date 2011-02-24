@@ -18,11 +18,9 @@
    Fifth Floor, Boston, MA 02110-1301, USA.
 */
 
+#include <getopt.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-
-#include <unistd.h>
-#include <getopt.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -34,22 +32,16 @@
 
 #include "articleaction.hh"
 #include "contextaction.hh"
+#include "options.hh"
 #include "searchaction.hh"
 #include "server.hh"
 
 
 namespace simplifyd {
 
-static option g_daemon_options[] = {
-    { "port", 1, 0, 0 },
-    { "repository", 1, 0, 0 },
-    { "html-dir" },
-    { "daemonize", 0, 0, 0 },
-    { "help", 0, 0, 0 },
-    { 0, 0, 0, 0 }
-};
-
-static const char *g_daemon_help =
+static void PrintHelpAndExit()
+{
+    const char *help_text =
 R"#(
 simplifyd [options]
 Daemon that serves search and browse requests from Simplify applications.
@@ -72,25 +64,23 @@ Daemon that serves search and browse requests from Simplify applications.
       Detach and run in background. Default: Run in foreground.
 
   -h, --help
-      Print this help text.
+      Print this help text and exit.
 )#";
 
-static void PrintHelpAndExit()
-{
-    std::cout << g_daemon_help << std::endl;
+    std::cout << help_text << std::endl;
     exit(0);
 }
 
-static bool ParseCommandLine(int argc, char *argv[],
-                             int &port,
-                             char **repository_path,
-                             char **html_dir,
-                             bool &daemonize)
+static bool ParseCommandLine(int argc, char *argv[], Options &options)
 {
-    port = 8000;
-    *repository_path = NULL;
-    *html_dir = NULL;
-    daemonize = false;
+    static option g_daemon_options[] = {
+        { "port", 1, 0, 'p' },
+        { "repository", 1, 0, 'r' },
+        { "html-dir", 1, 0, 'd' },
+        { "daemonize", 0, 0, 'b' },
+        { "help", 0, 0, 'h' },
+        { 0, 0, 0, 0 }
+    };
 
     while (true) {
         int argv_index;
@@ -104,23 +94,25 @@ static bool ParseCommandLine(int argc, char *argv[],
         switch (c) {
             case 'p': {
                 char *endptr;
-
-                port = strtol(optarg, &endptr, 10);
-                if (*endptr != '\0' || port <= 0 || port > 65535) {
-                    std::cout << "Invalid port number specified." << std::endl;
+                int port = strtol(optarg, &endptr, 10);
+                if (*endptr == '\0' && port > 0 && port < 65535) {
+                    options.SetPort(port);
+                } else {
+                    std::cout << "Port number is invalid." << std::endl;
                     return false;
                 }
                 break;
             }
             case 'r': {
-                *repository_path = strdup(optarg);
+                options.SetRepositoryDir(optarg);
                 break;
             }
             case 'd': {
-                *html_dir = strdup(optarg);
+                options.SetHtmlDir(optarg);
+                break;
             }
             case 'b': {
-                daemonize = true;
+                options.SetDaemonize(true);
                 break;
             }
             case 'h': {
@@ -130,23 +122,6 @@ static bool ParseCommandLine(int argc, char *argv[],
         }
     }
 
-    // Set defaults if nothing were specified on the command line.
-    if (!*repository_path) {
-        const char *suffix = "repository";
-        char *home = getenv("HOME");
-        size_t size = strlen(home) +
-                      strlen(SIMPLIFY_CONFIG_PATH) +
-                      sizeof(suffix) + 3;
-
-        *repository_path = static_cast<char *>(malloc(size));
-
-        sprintf(*repository_path, "%s/%s/%s",
-                home, SIMPLIFY_CONFIG_PATH, suffix);
-    }
-
-    if (!*html_dir)
-        *html_dir = strdup(SIMPLIFY_WWWROOT);
-
     return true;
 }
 
@@ -154,19 +129,11 @@ static bool ParseCommandLine(int argc, char *argv[],
 
 int main(int argc, char *argv[])
 {
-    int port;
-    char *repository_path;
-    char *html_dir;
-    bool daemonize;
-
-    if (!simplifyd::ParseCommandLine(argc, argv,
-                                     port,
-                                     &repository_path,
-                                     &html_dir,
-                                     daemonize))
+    simplifyd::Options options;
+    if (!simplifyd::ParseCommandLine(argc, argv, options))
         return 1;
 
-    if (daemonize) {
+    if (options.GetDaemonize()) {
         pid_t pid = fork();
 
         if (pid == -1) {
@@ -177,7 +144,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Increase the size of stack.
+    // Increase size of daemon's stack.
     {
         size_t required_size = 32 * 1024 * 1024;
         rlimit limit;
@@ -197,7 +164,7 @@ int main(int argc, char *argv[])
 
     int return_code;
     simplify::Likely<simplify::Repository *> likely_r =
-        simplify::Repository::New(repository_path);
+        simplify::Repository::New(options.GetRepositoryDir());
 
     // Start the web server if we've successfully opened repository.
     if (likely_r) {
@@ -206,15 +173,13 @@ int main(int argc, char *argv[])
         server.AddRoute("/search", new simplifyd::SearchAction());
         server.AddRoute("/article", new simplifyd::ArticleAction());
 
-        return_code = server.Start(port, repository_path, html_dir) ? 0 : 1;
+        return_code = server.Start(options) ? 0 : 1;
     } else {
-        std::cout << "Unable to open repository '" << repository_path << "': "
+        std::cout << "Unable to open repository '"
+                  << options.GetRepositoryDir()<< "': "
                   << likely_r.error_code().message() << "." << std::endl;
         return_code = 1;
     }
 
-    // Free some memory to keep valgrind happy.
-    free(repository_path);
-    free(html_dir);
     return return_code;
 }

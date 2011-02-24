@@ -48,6 +48,7 @@
         'httpresponse.cc',
         'main.cc',
         'mongoose.c',
+        'options.cc',
         'searchaction.cc',
         'server.cc',
       ],

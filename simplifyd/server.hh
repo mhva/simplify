@@ -33,7 +33,7 @@
 struct mg_context;
 namespace simplify { class Repository; }
 namespace simplifyd { class Action; }
-
+namespace simplifyd { class Options; }
 namespace simplifyd {
 
 struct QueryParam {
@@ -48,8 +48,7 @@ public:
 
     void AddRoute(const char *name, Action *action);
     void DeleteRoute(const char *name);
-
-    bool Start(int port, const char *repository_dir, const char *document_root);
+    bool Start(const Options &options);
 
 private:
     static void *Trampoline(mg_event, mg_connection *, mg_request_info *);
