@@ -456,14 +456,12 @@ Likely<Config *> Config::New(const char *config_filename)
         if (is_empty || buffer[line_start] == '#') {
             // Ignore line since it's empty or contains a full-line comment.
         } else if (buffer[line_start] == '[' && buffer[line_end - 1] == ']') {
-            // Start a new config section if we've encountered a section header.
-            if (current_section != NULL && !current_section->options_.empty()) {
+            // We have encountered a header of next section. Save the current
+            // section if it's not empty.
+            if (current_section != NULL && !current_section->options_.empty())
                 conf->sections_.push_back(current_section);
-            } else {
-                // Delete section since it's empty and we won't insert into the
-                // configuration object.
+            else
                 delete current_section;
-            }
 
             size_t name_start = line_start + 1;
             size_t name_length = line_end - line_start - 2;

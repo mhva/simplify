@@ -51,7 +51,6 @@ HttpQuery::~HttpQuery()
 const char *HttpQuery::GetParamValue(const char *name) const
 {
     auto it = LocateParam(name);
-
     if (it != query_params_.end())
         return (*it).value;
     else
@@ -61,7 +60,6 @@ const char *HttpQuery::GetParamValue(const char *name) const
 const char *HttpQuery::GetParamValue(const char *name, size_t &value_size) const
 {
     auto it = LocateParam(name);
-
     if (it != query_params_.end()) {
         value_size = (*it).value_size;
         return (*it).value;
@@ -76,7 +74,8 @@ const char *HttpQuery::GetCookieValue(const char *name) const
     return NULL;
 }
 
-const char *HttpQuery::GetCookieValue(const char *name, size_t &value_size) const
+const char *HttpQuery::GetCookieValue(const char *name,
+                                      size_t &value_size) const
 {
     assert(!"HttpQuery::GetCookieValue() not implemented");
     return NULL;
@@ -86,32 +85,24 @@ void HttpQuery::ParseQueryStringDestructive()
 {
     char *start = request_info_.query_string;
 
-    // Bail out if there is no query string.
+    // Done, if there is no query string.
     if (start == NULL)
         return;
 
     while (true) {
         char *eq = strchrnul(start, '=');
         char *amp = strchrnul(start, '&');
+        bool is_done = *amp == '\0';
 
-        // If we didn't find the equal sign then this means that the query
-        // string is not well-formed.
         if (*eq == '\0')
             return;
 
-        // If the amp pointer points to the NULL byte, the job is done and
-        // there is nothing else to parse.
-        bool is_done = *amp == '\0';
-
-        // Replace both '=' and '&' with NULL bytes to indicate the end
-        // of parameter's name and parameter's value.
+        // Replace both '=' and '&' with NULL bytes so we can use
+        // both parameter's name and value as a stand-alone strings.
         *eq = '\0';
         *amp = '\0';
 
-        // Do an in-place escape of parameter's value.
         size_t value_length = UnescapeString(eq + 1);
-
-        // Save the parameter if the value have been unescaped successfully.
         if (value_length != (size_t) -1)
             query_params_.push_back(QueryParam { start, eq + 1, value_length });
 
@@ -134,7 +125,7 @@ size_t HttpQuery::UnescapeString(char *string)
             continue;
         }
 
-        // Fail if we've stumbled upon an escape sequence but it's incomplete.
+        // Fail if we stumbled upon an escape sequence but it's incomplete.
         if (string[read_offset + 1] == '\0')
             return (size_t) -1;
 

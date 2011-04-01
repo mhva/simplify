@@ -225,12 +225,8 @@ static v8::Persistent<v8::Script> &GetDefaultJsScript()
  * \return If succeeds, returns number of bytes in the @buffer string. If fails,
  *  <em>(size_t) -1</em> will be returned.
  */
-static size_t Iconv(iconv_t cd,
-                    const char *input,
-                    size_t input_size,
-                    char *buffer,
-                    size_t buffer_size,
-                    std::error_code &error)
+static size_t Iconv(iconv_t cd, const char *input, size_t input_size,
+                    char *buffer, size_t buffer_size, std::error_code &error)
 {
     error.clear();
 
@@ -269,10 +265,8 @@ static size_t Iconv(iconv_t cd,
  * Encodes source UTF-8 string @input to EUC-JP string and stores it into
  * @buffer with the max size of @buffer_size.
  */
-inline static size_t ConvertUtf8ToEucJp(const char *input,
-                                        size_t input_size,
-                                        char *buffer,
-                                        size_t buffer_size,
+inline static size_t ConvertUtf8ToEucJp(const char *input, size_t input_size,
+                                        char *buffer, size_t buffer_size,
                                         std::error_code &error)
 {
     static iconv_t cd = iconv_open("EUC-JP", "UTF-8");
@@ -289,30 +283,24 @@ inline static size_t ConvertUtf8ToIso8859_1(const char *input,
     return Iconv(cd, input, input_size, buffer, buffer_size, error);
 }
 
-inline static size_t ConvertEucJpToUtf8(const char *input,
-                                        size_t input_size,
-                                        char *buffer,
-                                        size_t buffer_size,
+inline static size_t ConvertEucJpToUtf8(const char *input, size_t input_size,
+                                        char *buffer, size_t buffer_size,
                                         std::error_code &error)
 {
     static iconv_t cd = iconv_open("UTF-8", "EUC-JP");
     return Iconv(cd, input, input_size, buffer, buffer_size, error);
 }
 
-inline static size_t ConvertEucJpToUcs2(const char *input,
-                                        size_t input_size,
-                                        char *buffer,
-                                        size_t buffer_size,
+inline static size_t ConvertEucJpToUcs2(const char *input, size_t input_size,
+                                        char *buffer, size_t buffer_size,
                                         std::error_code &error)
 {
     static iconv_t cd = iconv_open("UCS-2", "EUC-JP");
     return Iconv(cd, input, input_size, buffer, buffer_size, error);
 }
 
-inline static size_t ConvertGb2312ToUcs2(const char *input,
-                                         size_t input_size,
-                                         char *buffer,
-                                         size_t buffer_size,
+inline static size_t ConvertGb2312ToUcs2(const char *input, size_t input_size,
+                                         char *buffer, size_t buffer_size,
                                          std::error_code &error)
 {
     static iconv_t cd = iconv_open("UCS-2", "GB2312");
@@ -329,8 +317,7 @@ inline static size_t ConvertIso8859_1ToUcs2(const char *input,
     return Iconv(cd, input, input_size, buffer, buffer_size, error);
 }
 
-static bool GuidToPosition(const char *guid,
-                           EB_Position &out,
+static bool GuidToPosition(const char *guid, EB_Position &out,
                            std::error_code &error)
 {
     char *endptr;
@@ -674,28 +661,22 @@ public:
             switch ((*it).charset) {
                 case Charset::Iso8859_1: {
                     length = ConvertIso8859_1ToUcs2(
-                            tmp_buffer + (*it).offset,
-                            (*it).length,
-                            buffer + result_length,
-                            buffer_size - result_length,
+                            tmp_buffer + (*it).offset, (*it).length,
+                            buffer + result_length, buffer_size - result_length,
                             error);
                     break;
                 }
                 case Charset::JisX0208: {
                     length = ConvertEucJpToUcs2(
-                            tmp_buffer + (*it).offset,
-                            (*it).length,
-                            buffer + result_length,
-                            buffer_size - result_length,
+                            tmp_buffer + (*it).offset, (*it).length,
+                            buffer + result_length, buffer_size - result_length,
                             error);
                     break;
                 }
                 case Charset::Gb2312: {
                     length = ConvertGb2312ToUcs2(
-                            tmp_buffer + (*it).offset,
-                            (*it).length,
-                            buffer + result_length,
-                            buffer_size - result_length,
+                            tmp_buffer + (*it).offset, (*it).length,
+                            buffer + result_length, buffer_size - result_length,
                             error);
                     break;
                 }
@@ -714,8 +695,7 @@ public:
                         return -1;
                     }
 
-                    memcpy(buffer + result_length,
-                           tmp_buffer + (*it).offset,
+                    memcpy(buffer + result_length, tmp_buffer + (*it).offset,
                            length);
                     break;
                 }
@@ -733,10 +713,8 @@ public:
 
 
     size_t PipeStringThroughJsFunction(JsFunction function,
-                                       const char *data,
-                                       size_t data_length,
-                                       char *buffer,
-                                       size_t buffer_size,
+                                       const char *data, size_t data_length,
+                                       char *buffer, size_t buffer_size,
                                        std::error_code &error) {
 
         // Pipe the article's heading through the user script.
@@ -907,9 +885,7 @@ public:
     Likely<size_t> FetchGuid(char *buffer, size_t buffer_size) {
         std::error_code error;
         size_t length = PositionToGuid(hits_[hit_offset_].text,
-                                       buffer,
-                                       buffer_size,
-                                       error);
+                                       buffer, buffer_size, error);
         if (length != (size_t)-1)
             return length;
         else
@@ -974,10 +950,8 @@ Likely<std::vector<std::string>> EpwingDictionary::ListSubBooks() const
         // FIXME: I'm not sure what encoding subbook titles use.
         // Assuming EUC-JP.
         std::error_code error;
-        size_t length = ConvertEucJpToUtf8(buffer,
-                                           strlen(buffer),
-                                           utf8buffer,
-                                           sizeof(utf8buffer),
+        size_t length = ConvertEucJpToUtf8(buffer, strlen(buffer),
+                                           utf8buffer, sizeof(utf8buffer),
                                            error);
         if (!error)
             names_list.push_back(std::string(utf8buffer, length));
@@ -1015,16 +989,12 @@ Likely<Dictionary::SearchResults *> EpwingDictionary::Search(const char *expr,
     std::error_code last_error;
 
     if (d->charset_ != EB_CHARCODE_ISO8859_1) {
-        ConvertUtf8ToEucJp(expr,
-                           expr_length + 1,
-                           conv_expr,
-                           sizeof(conv_expr),
+        ConvertUtf8ToEucJp(expr, expr_length + 1,
+                           conv_expr, sizeof(conv_expr),
                            last_error);
     } else {
-        ConvertUtf8ToIso8859_1(expr,
-                               expr_length + 1,
-                               conv_expr,
-                               sizeof(conv_expr),
+        ConvertUtf8ToIso8859_1(expr, expr_length + 1,
+                               conv_expr, sizeof(conv_expr),
                                last_error);
     }
 
@@ -1096,10 +1066,8 @@ Likely<size_t> EpwingDictionary::ReadText(const char *guid, char **ptr)
             *ptr = new char[buffer_size];
 
             length = d->PipeStringThroughJsFunction(JsFunction::ProcessText,
-                                                    tmp_buffer,
-                                                    length,
-                                                    *ptr,
-                                                    buffer_size,
+                                                    tmp_buffer, length,
+                                                    *ptr, buffer_size,
                                                     last_error);
             if (length != (size_t)-1) {
                 return length;
@@ -1120,8 +1088,7 @@ Likely<size_t> EpwingDictionary::ReadText(const char *guid, char **ptr)
 }
 
 Likely<size_t> EpwingDictionary::ReadText(const char *guid,
-                                          char *buffer,
-                                          size_t buffer_size)
+                                          char *buffer, size_t buffer_size)
 {
     EB_Position position;
     std::error_code last_error;
@@ -1143,11 +1110,8 @@ Likely<size_t> EpwingDictionary::ReadText(const char *guid,
         return last_error;
 
     length = d->PipeStringThroughJsFunction(JsFunction::ProcessText,
-                                            tmp_buffer,
-                                            length,
-                                            buffer,
-                                            buffer_size,
-                                            last_error);
+                                            tmp_buffer, length,
+                                            buffer, buffer_size, last_error);
     if (length != (size_t)-1)
         return length;
     else
@@ -1295,10 +1259,8 @@ inline static EB_Error_Code WriteJs(EB_Book *book,
 
     using namespace v8;
     Handle<Value> result =
-        context->js_functions[fun_index]->Call(
-                Context::GetEntered()->Global(),
-                argc,
-                argv);
+        context->js_functions[fun_index]->Call(Context::GetEntered()->Global(),
+                                               argc, argv);
 
     if (!result.IsEmpty() && result->IsString()) {
         Handle<String> string = result.As<String>();
@@ -1308,9 +1270,7 @@ inline static EB_Error_Code WriteJs(EB_Book *book,
         // Even though the v8 documentation states that the value returned
         // from the String::Write() method is the number of bytes written,
         // in reality though, it's the number of characters written.
-        return WriteByteRange(book,
-                              context,
-                              Charset::Ucs2,
+        return WriteByteRange(book, context, Charset::Ucs2,
                               reinterpret_cast<char *>(chars),
                               copied * sizeof(uint16_t));
     } else {
@@ -1318,8 +1278,7 @@ inline static EB_Error_Code WriteJs(EB_Book *book,
     }
 }
 
-inline static EB_Error_Code WriteJs(EB_Book *book,
-                                    HookContext *context,
+inline static EB_Error_Code WriteJs(EB_Book *book, HookContext *context,
                                     JsFunction function)
 {
     return WriteJs(book, context, function, 0, NULL);

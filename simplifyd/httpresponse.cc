@@ -41,7 +41,6 @@ static size_t Uitoa10(size_t v, char *buffer)
 {
     char *out = buffer;
     do *out++ = '0' + v % 10; while (v /= 10);
-
     std::reverse(buffer, out);
     return out - buffer;
 }
@@ -79,12 +78,15 @@ void HttpResponse::AddHeader(const char *name, const char *value)
 
 void HttpResponse::OverrideHeader(const char *name, const char *value)
 {
+    // Check if header with the given name already exists.
     auto it = std::find_if(headers_.begin(), headers_.end(),
         [name](HttpHeader *h) {
             return strcmp(h->name, name) == 0;
         }
     );
 
+    // Replace header's value if it already exists, or create a new header
+    // otherwise.
     if (it != headers_.end()) {
         size_t value_length = strlen(value);
 
@@ -153,7 +155,7 @@ std::string HttpResponse::ProduceResponse() const
             .append(number_buffer, number_length) \
             .append("\r\n\r\n");
 
-    // Append the body.
+    // Append body.
     response.append(body_);
 
     return response;

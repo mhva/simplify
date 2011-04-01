@@ -31,14 +31,9 @@ namespace simplifyd {
 class Action
 {
 public:
-    Action() {};
     virtual ~Action() {};
-
     virtual void Handle(simplify::Repository &repository,
-                        HttpQuery &query,
-                        HttpResponse &response) = 0;
-
-private:
+                        HttpQuery &query, HttpResponse &response) = 0;
 };
 
 }  // namespace simplifyd
