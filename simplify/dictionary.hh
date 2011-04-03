@@ -40,22 +40,11 @@ public:
         virtual ~SearchResults() {}
 
         virtual size_t GetCount() const = 0;
-        virtual bool SeekNext() = 0;
+        virtual std::error_code SeekNext() = 0;
 
-        virtual Likely<size_t> FetchGuid(char *buffer, size_t buffer_size) = 0;
-
-        virtual Likely<size_t> InitializeHeadingData(char *buffer,
-                                                     size_t buffer_size) = 0;
-
-        virtual Likely<size_t> FetchHeading(const char *data,
-                                            size_t data_length,
-                                            char *buffer,
-                                            size_t buffer_size) = 0;
-
-        virtual Likely<size_t> FetchTags(const char *data,
-                                         size_t data_length,
-                                         char *buffer,
-                                         size_t buffer_size) = 0;
+        virtual Likely<size_t> FetchGuid(char *buffer, size_t size) = 0;
+        virtual Likely<size_t> FetchHeading(char *buffer, size_t size) = 0;
+        virtual Likely<size_t> FetchTags(char *buffer, size_t size) = 0;
     };
 
     Dictionary(Config *conf);

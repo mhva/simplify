@@ -418,10 +418,7 @@ public:
     typedef EB_Error_Code (*ReaderFn)(EB_Book *, EB_Appendix *, EB_Hookset *,
                                       void *, size_t, char *, ssize_t *);
 
-    Private(EpwingDictionary *parent)
-        : q(parent),
-          last_sought_text_({-1, -1}) {
-
+    Private() : last_sought_text_({-1, -1}) {
         eb_initialize_book(&book_);
         eb_initialize_hookset(&head_hookset_);
         eb_initialize_hookset(&text_hookset_);
@@ -483,18 +480,16 @@ public:
         }
     }
 
-    std::error_code PopulateJsContext() {
+    std::error_code PopulateJsContext(const char *script_filename) {
         // Read the user script from script.js.
         std::error_code error;
-        std::string jscript =
-            q->GetConfig().GetEnclosingDirectory() + "/custom.js";
 
         // Read file content.
         // We ignore any errors at this point because we still need to populate
         // context with default implementations of the hook functions.
         // In case of an error we'll just refuse to compile and execute user
         // script later.
-        auto data = ReadFile(jscript.c_str(), error);
+        auto data = ReadFile(script_filename, error);
 
         // Populate JavaScript context of the dictionary.
         using namespace v8;
@@ -515,7 +510,7 @@ public:
         // from the script.js file.
         if (!error) {
             Handle<String> source = String::New(data.first, data.second);
-            Handle<String> origin = String::New(jscript.c_str());
+            Handle<String> origin = String::New(script_filename);
 
             // TODO: Add more verbosiness to js error reports.
             Handle<Script> script = Script::Compile(source, origin);
@@ -760,7 +755,6 @@ public:
     }
 
 public:
-    EpwingDictionary *q;
     EB_Book book_;
     EB_Character_Code charset_;
     EB_Hookset head_hookset_;
@@ -788,59 +782,50 @@ public:
         return hit_count_;
     }
 
-    bool SeekNext() {
+    std::error_code SeekNext() {
         size_t offset = hit_offset_ + 1;
         std::error_code e;
 
-        if (unlikely(offset >= hit_count_ ||
-                     !d->SeekEntity(hits_[offset].heading, e)))
-            return false;
+        if (unlikely(offset >= hit_count_))
+            return make_error_code(simplify_error::no_more_results);
+        else if (unlikely(!d->SeekEntity(hits_[offset].heading, e)))
+            return e;
 
         hit_offset_ = offset;
 
+        // For some reason, some dictionaries return two entries
+        // pointing to the same article. It wont be a problem
+        // if there were only a few duplicates, but in reality,
+        // search results tend to be oversaturated by duplicates.
+        //
+        // It is also worth pointing out that checking each entry
+        // against hash table would be more bullet-proof method,
+        // but I haven't yet encountered any non-adjacent duplicates.
         if (offset > 0) {
             EB_Position &prevText = hits_[offset - 1].text;
             EB_Position &thisText = hits_[offset].text;
 
-            // For some reason, some dictionaries return two entries
-            // pointing to the same article. It wont be a problem
-            // if there would be only a few duplicates, but in reality,
-            // search results tend to be oversaturated with duplicates.
-            //
-            // It is also worth pointing out that checking each entry
-            // against hash table would be more bullet-proof method,
-            // but I haven't yet encountered any non-adjacent duplicates.
-            return unlikely(
-                    prevText.page == thisText.page &&
-                    prevText.offset == thisText.offset) ? SeekNext() : true;
-        } else {
-            return true;
+            if (unlikely(prevText.page == thisText.page &&
+                         prevText.offset == thisText.offset))
+                return SeekNext();
         }
+
+        heading_length_ = d->ReadHeading(heading_, sizeof(heading_), e) / 2;
+
+        // Skip this search result if heading was too large to fit into
+        // temporary buffer.
+        if (unlikely(e == simplify_error::buffer_exhausted))
+            return SeekNext();
+
+        return e;
     }
 
-    Likely<size_t> InitializeHeadingData(char *buffer, size_t buffer_size) {
-        std::error_code error;
-        size_t bytes_read = d->ReadHeading(buffer, buffer_size, error);
-
-        if (bytes_read != (size_t) -1)
-            return bytes_read;
-        else
-            return error;
+    Likely<size_t> FetchHeading(char *buffer, size_t buffer_size) {
+        return FetchHelper(JsFunction::ProcessHeading, buffer, buffer_size);
     }
 
-
-    Likely<size_t> FetchHeading(const char *data, size_t data_length,
-                                char *buffer, size_t buffer_size) {
-        return FetchHelper(JsFunction::ProcessHeading,
-                           data, data_length,
-                           buffer, buffer_size);
-    }
-
-    Likely<size_t> FetchTags(const char *data, size_t data_length,
-                             char *buffer, size_t buffer_size) {
-        return FetchHelper(JsFunction::ProcessTags,
-                           data, data_length,
-                           buffer, buffer_size);
+    Likely<size_t> FetchTags(char *buffer, size_t buffer_size) {
+        return FetchHelper(JsFunction::ProcessTags, buffer, buffer_size);
     }
 
     Likely<size_t> FetchGuid(char *buffer, size_t buffer_size) {
@@ -863,12 +848,11 @@ public:
 
 private:
     inline Likely<size_t> FetchHelper(JsFunction function,
-                                      const char *data, size_t data_length,
                                       char *buffer, size_t buffer_size) {
         std::error_code error;
         size_t bytes_read = d->PipeStringThroughJsFunction(function,
-                                                           data,
-                                                           data_length / 2,
+                                                           heading_,
+                                                           heading_length_,
                                                            buffer, buffer_size,
                                                            error);
         if (bytes_read != (size_t)-1)
@@ -882,8 +866,9 @@ private:
     size_t hit_offset_;
     size_t hit_count_;
     EB_Hit *hits_;
-
     v8::Locker v8_lock_;
+    size_t heading_length_;
+    char heading_[4096];
 };
 
 EpwingDictionary::EpwingDictionary(Config *conf) : Dictionary(conf)
@@ -892,7 +877,7 @@ EpwingDictionary::EpwingDictionary(Config *conf) : Dictionary(conf)
     // that we might be using threads.
     v8::Locker lock;
 
-    d = new Private(this);
+    d = new Private();
 }
 
 EpwingDictionary::~EpwingDictionary()
@@ -1185,7 +1170,9 @@ std::error_code EpwingDictionary::Initialize()
     d->SelectSubBook(epwing.ReadInt32("subbook", 0), last_error);
 
     // TODO: Notify if we've failed to load user scripts.
-    d->PopulateJsContext();
+    std::string custom_js = conf_->GetEnclosingDirectory() + "/custom.js";
+    d->PopulateJsContext(custom_js.c_str());
+
     return last_error;
 }
 

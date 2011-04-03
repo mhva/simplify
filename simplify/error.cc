@@ -73,6 +73,8 @@ public:
             return "Input buffer exhausted, allocate more memory";
         case simplify_error::unexpected_result_type:
             return "Unexpected result type";
+        case simplify_error::no_more_results:
+            return "No more results";
         default:
             return "Unkown Simplify error";
         }

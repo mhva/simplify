@@ -44,7 +44,8 @@ enum class simplify_error {
     empty_string           = 15,
     empty_likely           = 16,
     buffer_exhausted       = 17,
-    unexpected_result_type = 18
+    unexpected_result_type = 18,
+    no_more_results        = 19
 };
 
 /*

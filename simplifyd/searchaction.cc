@@ -113,14 +113,14 @@ void SearchAction::SearchDict(simplify::Repository &repository,
 
     // 4K is ought to be enough for a search result name or GUID.
     // Anything near or beyond that size is just crazy anyway.
-    char data_buffer[4 * 1024];
     char text_buffer[4 * 1024];
     size_t accepted_results_count = 0;
+    std::error_code seek_error;
 
-    while (results->SeekNext()) {
+    while (!(seek_error = results->SeekNext())) {
         // Integer containing an offset in the body where the current
         // result starts. We use the value of this variable to erase
-        // result's text in if case anything goes wrong to avoid producing
+        // result's text in case anything goes wrong to avoid producing
         // malformed JSON.
         size_t result_start = body.length();
 
@@ -139,27 +139,7 @@ void SearchAction::SearchDict(simplify::Repository &repository,
             continue;
         }
 
-        size_t data_length;
-        likely_length =
-            results->InitializeHeadingData(data_buffer,
-                                           sizeof(data_buffer));
-
-        if (likely_length) {
-          data_length = likely_length;
-        } else {
-            std::cout << "An error occurred while initializing heading "
-                      << "data for a search result with article GUID "
-                      << text_buffer << " from " << dict.GetName() << ": "
-                      << likely_length.error_code().message() << std::endl;
-            body.erase(result_start);
-            continue;
-        }
-
-        likely_length =
-            results->FetchHeading(data_buffer,
-                                  data_length,
-                                  text_buffer,
-                                  sizeof(text_buffer));
+        likely_length = results->FetchHeading(text_buffer, sizeof(text_buffer));
         if (likely_length) {
             body.append("\"")
                 .append(text_buffer, likely_length)
@@ -185,11 +165,7 @@ void SearchAction::SearchDict(simplify::Repository &repository,
             continue;
         }
 
-        likely_length =
-            results->FetchTags(data_buffer,
-                               data_length,
-                               text_buffer,
-                               sizeof(text_buffer));
+        likely_length = results->FetchTags(text_buffer, sizeof(text_buffer));
         if (likely_length) {
             // Only append tags if the string is not empty.
             if (likely_length > 0) {
