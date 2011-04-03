@@ -205,17 +205,15 @@ static v8::Persistent<v8::Script> &GetDefaultJsScript()
     static Persistent<Script> script =
         Persistent<Script>::New(
                 Script::New(String::New(g_default_js_implementation)));
-
     return script;
 }
 
 /**
- * Encodes source string specified in the variable @input using iconv conversion
- * descriptor @cd.
+ * Converts the encoding of source string using iconv conversion descriptor @cd.
  *
  * \param cd iconv conversion descriptor.
- * \param input A pointer to the source string to encode.
- * \param input_size Size of the @input.
+ * \param input A pointer to a source string to encode.
+ * \param input_size Size of the @input string.
  * \param buffer A pointer to the buffer where resulting string should be
  *  stored.
  * \param buffer_size Size of the buffer pointed by @buffer.
@@ -417,8 +415,8 @@ private:
 
 class EpwingDictionary::Private {
 public:
-    typedef EB_Error_Code (*reader_fun)(EB_Book *, EB_Appendix *, EB_Hookset *,
-                                        void *, size_t, char *, ssize_t *);
+    typedef EB_Error_Code (*ReaderFn)(EB_Book *, EB_Appendix *, EB_Hookset *,
+                                      void *, size_t, char *, ssize_t *);
 
     Private(EpwingDictionary *parent)
         : q(parent),
@@ -599,7 +597,7 @@ public:
         }
     }
 
-    inline bool SeekTextConvenient(EB_Position &position, std::error_code &e) {
+    inline bool SeekText(EB_Position &position, std::error_code &e) {
         if (position.page != last_sought_text_.page ||
             position.offset != last_sought_text_.offset) {
             return SeekEntity(position, e);
@@ -608,16 +606,11 @@ public:
         }
     }
 
-    size_t ReadUcs2Text(reader_fun function,
-                        EB_Hookset &hookset,
-                        char *buffer,
-                        size_t buffer_size,
+    size_t ReadUcs2Text(ReaderFn function, EB_Hookset &hookset,
+                        char *buffer, size_t buffer_size,
                         std::error_code &error) {
 
         assert(buffer_size > 0);
-
-        char tmp_buffer[buffer_size];
-        ssize_t text_length;
 
         v8::HandleScope handle_scope;
         v8::Context::Scope context_scope(js_context_);
@@ -628,9 +621,19 @@ public:
         write_context.js_functions = js_functions_;
 
         // Read dictionary text into temporary buffer. The buffer might
-        // contain char ranges with different character encodings. Each
-        // range is described in the HookContext::byte_ranges vector by
-        // hook functions. Later, we'll encode bufer into UTF-8.
+        // contain char ranges with varying character encodings. Each
+        // range is described in the HookContext::byte_ranges vector.
+        // This vector will be populated by our hook functions.
+        //
+        // Q: Why not convert everything to UCS-2 on the fly?
+        // A: Libeb allows us to write only 1 character at time, invoking
+        //    iconv for every character adds a large performance overhead.
+        //    To mitigate this, characters are being copied to buffer verbatim,
+        //    for each sequence of characters with same encoding we store a
+        //    descriptor which will be used later to encode associated
+        //    character sequence to UCS-2.
+        char tmp_buffer[buffer_size];
+        ssize_t text_length;
         EB_Error_Code eb_code = (*function)(&book_,
                                             NULL,
                                             &hookset,
@@ -642,96 +645,80 @@ public:
             error = make_error_code(static_cast<eb_error>(eb_code));
             return -1;
         }
-
         if (!eb_is_text_stopped(&book_)) {
             error = make_error_code(simplify_error::buffer_exhausted);
             return -1;
         }
 
-        // Re-encode non-uniform temporary buffer into UTF-8 string and
-        // store it into the given buffer.
-        size_t result_length = 0;
-
+        // Convert text in the temporary buffer to UCS-2.
+        size_t write_offset = 0;
         for (auto it = write_context.byte_ranges.begin();
              it != write_context.byte_ranges.end();
              ++it) {
+            size_t bytes_written;
 
-            size_t length;
+            assert(write_offset % 2 == 0);
 
             switch ((*it).charset) {
-                case Charset::Iso8859_1: {
-                    length = ConvertIso8859_1ToUcs2(
+                case Charset::Iso8859_1:
+                    bytes_written = ConvertIso8859_1ToUcs2(
                             tmp_buffer + (*it).offset, (*it).length,
-                            buffer + result_length, buffer_size - result_length,
+                            buffer + write_offset, buffer_size - write_offset,
                             error);
                     break;
-                }
-                case Charset::JisX0208: {
-                    length = ConvertEucJpToUcs2(
+                case Charset::JisX0208:
+                    bytes_written = ConvertEucJpToUcs2(
                             tmp_buffer + (*it).offset, (*it).length,
-                            buffer + result_length, buffer_size - result_length,
+                            buffer + write_offset, buffer_size - write_offset,
                             error);
                     break;
-                }
-                case Charset::Gb2312: {
-                    length = ConvertGb2312ToUcs2(
+                case Charset::Gb2312:
+                    bytes_written = ConvertGb2312ToUcs2(
                             tmp_buffer + (*it).offset, (*it).length,
-                            buffer + result_length, buffer_size - result_length,
+                            buffer + write_offset, buffer_size - write_offset,
                             error);
                     break;
-                }
-                case Charset::Ucs2: {
-                    // Copy the UCS-2 range into the dst. buffer verbatim.
-                    length = (*it).length;
-
-                    // Ensure if there is enough free space in the buffer.
-                    // NOTE: We also fail if the resulting length is equal
-                    // to the buffer size. Even though, we might have enough
-                    // space to store this UCS-2 string, it will certainly not
-                    // enough to store terminating NULL byte.
-                    if (result_length + length >= buffer_size) {
+                case Charset::Ucs2:
+                    bytes_written = (*it).length;
+                    if (write_offset + bytes_written > buffer_size) {
                         error =
                             make_error_code(simplify_error::buffer_exhausted);
                         return -1;
                     }
 
-                    memcpy(buffer + result_length, tmp_buffer + (*it).offset,
-                           length);
+                    memcpy(buffer + write_offset, tmp_buffer + (*it).offset,
+                           bytes_written);
                     break;
-                }
             }
 
             if (!error)
-                result_length += length;
+                write_offset += bytes_written;
             else
                 return -1;
         }
 
-        assert(result_length % 2 == 0);
-        return result_length;
+        return write_offset;
     }
 
 
     size_t PipeStringThroughJsFunction(JsFunction function,
-                                       const char *data, size_t data_length,
+                                       const char *ucs2_bytes,
+                                       size_t ucs2_length,
                                        char *buffer, size_t buffer_size,
                                        std::error_code &error) {
-
-        // Pipe the article's heading through the user script.
         using namespace v8;
 
         HandleScope handle_scope;
         Context::Scope context_scope(js_context_);
 
-        size_t fun_index = static_cast<size_t>(function);
+        size_t fn_index = static_cast<size_t>(function);
         Handle<Value> argv[] = {
-            String::NewExternal(
-                    new ExternalUcs2String(
-                        reinterpret_cast<const uint16_t *>(data),
-                        data_length / 2))
+            String::NewExternal(new ExternalUcs2String(
+                reinterpret_cast<const uint16_t *>(ucs2_bytes),
+                ucs2_length))
         };
 
-        Handle<Value> result = js_functions_[fun_index]->Call(
+        Handle<Value> result = js_functions_[fn_index]->Call(
                 v8::Context::GetEntered()->Global(),
                 sizeof(argv) / sizeof(argv[0]),
                 argv);
@@ -744,22 +731,19 @@ public:
         // Ensure that the js function has returned a valid string object.
         // It's very unlikely that the function will return an invalid
         // object, but if it does, that means that the function contains a
-        // bug. In this case we put into the buffer an unmodified dictionary
-        // data.
+        // bug.
         if (!result.IsEmpty() && result->IsString()) {
             string = result.As<String>();
         } else {
-            //string = argv[0].As<String>();
             error = make_error_code(simplify_error::unexpected_result_type);
             return -1;
         }
 
         nbytes = string->WriteUtf8(buffer, buffer_size, &nchars);
 
-        // Check if we have enough space in the buffer to copy the result.
+        // Check if we were able to store the whole UTF-8 string into
+        // destination buffer.
         if (nchars == string->Length()) {
-            // We return the length of the result, but nbytes includes 1 byte
-            // for NULL terminator.
             return nbytes - 1;
         } else {
             error = make_error_code(simplify_error::buffer_exhausted);
@@ -836,50 +820,27 @@ public:
 
     Likely<size_t> InitializeHeadingData(char *buffer, size_t buffer_size) {
         std::error_code error;
-        size_t length = d->ReadHeading(buffer, buffer_size, error);
+        size_t bytes_read = d->ReadHeading(buffer, buffer_size, error);
 
-        if (length != (size_t) -1)
-            return length;
+        if (bytes_read != (size_t) -1)
+            return bytes_read;
         else
             return error;
     }
 
-    Likely<size_t> FetchHeading(const char *data,
-                                size_t data_length,
-                                char *buffer,
-                                size_t buffer_size) {
-        std::error_code error;
-        size_t length = d->PipeStringThroughJsFunction(
-                JsFunction::ProcessHeading,
-                data,
-                data_length,
-                buffer,
-                buffer_size,
-                error);
 
-        if (length != (size_t)-1)
-            return length;
-        else
-            return error;
+    Likely<size_t> FetchHeading(const char *data, size_t data_length,
+                                char *buffer, size_t buffer_size) {
+        return FetchHelper(JsFunction::ProcessHeading,
+                           data, data_length,
+                           buffer, buffer_size);
     }
 
-    Likely<size_t> FetchTags(const char *data,
-                             size_t data_length,
-                             char *buffer,
-                             size_t buffer_size) {
-        std::error_code error;
-        size_t length = d->PipeStringThroughJsFunction(
-                JsFunction::ProcessTags,
-                data,
-                data_length,
-                buffer,
-                buffer_size,
-                error);
-
-        if (length != (size_t)-1)
-            return length;
-        else
-            return error;
+    Likely<size_t> FetchTags(const char *data, size_t data_length,
+                             char *buffer, size_t buffer_size) {
+        return FetchHelper(JsFunction::ProcessTags,
+                           data, data_length,
+                           buffer, buffer_size);
     }
 
     Likely<size_t> FetchGuid(char *buffer, size_t buffer_size) {
@@ -898,6 +859,22 @@ public:
 
     inline void operator delete(void *mem) {
         free(mem);
+    }
+
+private:
+    inline Likely<size_t> FetchHelper(JsFunction function,
+                                      const char *data, size_t data_length,
+                                      char *buffer, size_t buffer_size) {
+        std::error_code error;
+        size_t bytes_read = d->PipeStringThroughJsFunction(function,
+                                                           data,
+                                                           data_length / 2,
+                                                           buffer, buffer_size,
+                                                           error);
+        if (bytes_read != (size_t)-1)
+            return bytes_read;
+        else
+            return error;
     }
 
 private:
@@ -1040,45 +1017,42 @@ Likely<size_t> EpwingDictionary::ReadText(const char *guid, char **ptr)
     std::error_code last_error;
 
     if (!GuidToPosition(guid, position, last_error) ||
-        !d->SeekTextConvenient(position, last_error)) {
-        *ptr = NULL;
+        !d->SeekText(position, last_error))
         return last_error;
-    }
 
-    // Acquire big v8 lock (a requiremenet imposed by ReadText and
+    // Acquire big v8 lock (a requirement imposed by ReadText and
     // PipeStringThroughJsFunction methods).
     v8::Locker v8_lock;
 
-    size_t tmp_buffer_size = 4096;
-
-    // Read text from the dictionary. For the reason that libeb doesn't
-    // provide any way to discover the length of the article's text,
-    // we need to guess an optimal size of the buffer by using bruteforce.
+    // Read text from the dictionary. There is no way to determine length
+    // of article's text in advance, we have to do some guesswork.
+    size_t ucs2_buffer_size = 4096;
     while (true) {
-        char tmp_buffer[tmp_buffer_size];
-        size_t length = d->ReadText(tmp_buffer, tmp_buffer_size, last_error);
+        char ucs2_text[ucs2_buffer_size];
+        size_t bytes_read =
+            d->ReadText(ucs2_text, ucs2_buffer_size, last_error);
 
-        if (length != (size_t) -1) {
-            // Text read successfully.
-
-            // Allocate large enough buffer store store UTF-8 text.
-            size_t buffer_size = length * 2;
+        if (bytes_read != (size_t) -1) {
+            // Allocate a buffer that's large enough to store store UTF-8 text
+            // and pipe article's UCS-2 text through the ProcessText() script
+            // function.
+            size_t buffer_size = bytes_read * 3;
             *ptr = new char[buffer_size];
-
-            length = d->PipeStringThroughJsFunction(JsFunction::ProcessText,
-                                                    tmp_buffer, length,
-                                                    *ptr, buffer_size,
-                                                    last_error);
-            if (length != (size_t)-1) {
-                return length;
+            bytes_read = d->PipeStringThroughJsFunction(JsFunction::ProcessText,
+                                                        ucs2_text,
+                                                        bytes_read / 2,
+                                                        *ptr, buffer_size,
+                                                        last_error);
+            if (bytes_read != (size_t)-1) {
+                return bytes_read;
             } else {
                 delete[] *ptr;
                 return last_error;
             }
         } else {
-            // Do another round if the buffer was not big enough.
+            // Do another round if the buffer was not large enough.
             if (last_error == simplify_error::buffer_exhausted) {
-                tmp_buffer_size += 2048;
+                ucs2_buffer_size += 2048;
                 continue;
             } else {
                 return last_error;
@@ -1094,26 +1068,27 @@ Likely<size_t> EpwingDictionary::ReadText(const char *guid,
     std::error_code last_error;
 
     if (!GuidToPosition(guid, position, last_error) ||
-        !d->SeekTextConvenient(position, last_error)) {
+        !d->SeekText(position, last_error)) {
         return last_error;
     }
 
-    // Acquire big v8 lock (a requiremenet imposed by ReadText and
-    // PipeStringThroughJsFunction methods).
+    // Acquire big v8 lock (a requirement for ReadText() and
+    // PipeStringThroughJsFunction() methods).
     v8::Locker v8_lock;
 
-    // We need a temporary buffer to store the UCS-2 text.
-    char tmp_buffer[buffer_size];
-
-    size_t length = d->ReadText(tmp_buffer, buffer_size, last_error);
-    if (length == (size_t)-1)
+    // Read article's text to a temporary buffer and then process it using
+    // the ProcessText() script function.
+    char ucs2_text[buffer_size * 2];
+    size_t bytes_read = d->ReadText(ucs2_text, buffer_size, last_error);
+    if (bytes_read == (size_t)-1)
         return last_error;
 
-    length = d->PipeStringThroughJsFunction(JsFunction::ProcessText,
-                                            tmp_buffer, length,
-                                            buffer, buffer_size, last_error);
-    if (length != (size_t)-1)
-        return length;
+    bytes_read = d->PipeStringThroughJsFunction(JsFunction::ProcessText,
+                                                ucs2_text, bytes_read / 2,
+                                                buffer, buffer_size,
+                                                last_error);
+    if (bytes_read != (size_t)-1)
+        return bytes_read;
     else
         return last_error;
 }
@@ -1214,11 +1189,9 @@ std::error_code EpwingDictionary::Initialize()
     return last_error;
 }
 
-inline static EB_Error_Code WriteByteRange(EB_Book *book,
-                                           HookContext *context,
+inline static EB_Error_Code WriteByteRange(EB_Book *book, HookContext *context,
                                            Charset charset,
-                                           const char *string,
-                                           size_t length)
+                                           const char *string, size_t length)
 {
     if (length == 0) {
         return EB_SUCCESS;
@@ -1246,21 +1219,19 @@ inline static EB_Error_Code WriteByteRange(EB_Book *book,
     return eb_code;
 }
 
-inline static EB_Error_Code WriteJs(EB_Book *book,
-                                    HookContext *context,
+inline static EB_Error_Code WriteJs(EB_Book *book, HookContext *context,
                                     JsFunction function,
-                                    int argc,
-                                    v8::Handle<v8::Value> *argv)
+                                    int argc, v8::Handle<v8::Value> *argv)
 {
-    size_t fun_index = static_cast<size_t>(function);
+    size_t fn_index = static_cast<size_t>(function);
 
-    assert(!context->js_functions[fun_index].IsEmpty() &&
-           context->js_functions[fun_index]->IsFunction());
+    assert(!context->js_functions[fn_index].IsEmpty() &&
+           context->js_functions[fn_index]->IsFunction());
 
     using namespace v8;
     Handle<Value> result =
-        context->js_functions[fun_index]->Call(Context::GetEntered()->Global(),
-                                               argc, argv);
+        context->js_functions[fn_index]->Call(Context::GetEntered()->Global(),
+                                              argc, argv);
 
     if (!result.IsEmpty() && result->IsString()) {
         Handle<String> string = result.As<String>();
@@ -1285,7 +1256,7 @@ inline static EB_Error_Code WriteJs(EB_Book *book, HookContext *context,
 }
 
 static EB_Error_Code HandleIso8859_1(EB_Book *book, EB_Appendix *, void *arg,
-                                     EB_Hook_Code, int argc,
+                                     EB_Hook_Code,int argc,
                                      const unsigned int *argv)
 {
     // FIXME: Broken on big-endian machines.
