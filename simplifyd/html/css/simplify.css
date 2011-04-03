@@ -244,6 +244,7 @@ body {
   background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#d4e4ef), color-stop(100%,#86aecc));
   -webkit-border-radius: 4px;
   text-shadow: 0 1px 1px rgba(255,255,255,.9);
+  margin-right: 10px;
 }
 
 .a-ref:hover {
