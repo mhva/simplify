@@ -394,10 +394,7 @@ class ExternalUcs2String : public v8::String::ExternalStringResource {
 public:
     ExternalUcs2String(const uint16_t *string, size_t length)
       : string_(string),
-        length_(length ) {
-    }
-
-    ~ExternalUcs2String() {
+        length_(length) {
     }
 
     const uint16_t *data() const {
