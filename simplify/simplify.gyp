@@ -48,7 +48,7 @@
         ['OS == "linux"', {
           'cflags': [
             '-std=c++0x', '-fstrict-aliasing', '-Wall',
-            '-Wstrict-aliasing=2',
+            '-Wstrict-aliasing=2', '-pedantic'
           ],
           'libraries': [
             '-lrt'
