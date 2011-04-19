@@ -35,11 +35,11 @@
 
 #include <v8.h>
 
-#include "config.hh"
-#include "error.hh"
-#include "utils.hh"
+#include <simplify/config.hh>
+#include <simplify/error.hh>
+#include <simplify/utils.hh>
 
-#include "epwing-dictionary-js.hh"
+#include "defaultjs.hh"
 #include "epwing-dictionary.hh"
 
 namespace simplify {

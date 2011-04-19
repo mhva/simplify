@@ -30,9 +30,9 @@
         },
       },
       'sources': [
+        'epwing/epwing-dictionary.cc',
         'config.cc',
         'dictionary.cc',
-        'epwing-dictionary.cc',
         'error.cc',
         'repository.cc',
         'utils.cc',

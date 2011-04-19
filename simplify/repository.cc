@@ -33,8 +33,8 @@
 #include <algorithm>
 #include <string>
 
+#include "epwing/epwing-dictionary.hh"
 #include "config.hh"
-#include "epwing-dictionary.hh"
 #include "error.hh"
 
 #include "repository.hh"
