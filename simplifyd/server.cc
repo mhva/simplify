@@ -84,6 +84,7 @@ bool Server::Start(const Options &options)
     const char *mg_options[] = {
         "listening_ports", str_port,
         "document_root", options.GetHtmlDir(),
+        "num_threads", "5",
         NULL
     };
 
