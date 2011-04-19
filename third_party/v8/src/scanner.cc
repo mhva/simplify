@@ -1,4 +1,4 @@
-// Copyright 2010 the V8 project authors. All rights reserved.
+// Copyright 2011 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -76,7 +76,8 @@ void BufferedUC16CharacterStream::SlowPushBack(uc16 character) {
     buffer_end_ = buffer_ + kBufferSize;
     buffer_cursor_ = buffer_end_;
   }
-  ASSERT(pushback_limit_ > buffer_);
+  // Ensure that there is room for at least one pushback.
+  ASSERT(buffer_cursor_ > buffer_);
   ASSERT(pos_ > 0);
   buffer_[--buffer_cursor_ - buffer_] = character;
   if (buffer_cursor_ == buffer_) {
@@ -89,15 +90,17 @@ void BufferedUC16CharacterStream::SlowPushBack(uc16 character) {
 
 
 bool BufferedUC16CharacterStream::ReadBlock() {
+  buffer_cursor_ = buffer_;
   if (pushback_limit_ != NULL) {
-    buffer_cursor_ = buffer_;
+    // Leave pushback mode.
     buffer_end_ = pushback_limit_;
     pushback_limit_ = NULL;
-    ASSERT(buffer_cursor_ != buffer_end_);
-    return true;
+    // If there were any valid characters left at the
+    // start of the buffer, use those.
+    if (buffer_cursor_ < buffer_end_) return true;
+    // Otherwise read a new block.
   }
   unsigned length = FillBuffer(pos_, kBufferSize);
-  buffer_cursor_ = buffer_;
   buffer_end_ = buffer_ + length;
   return length > 0;
 }
@@ -325,8 +328,6 @@ void Scanner::LiteralScope::Complete() {
 // ----------------------------------------------------------------------------
 // V8JavaScriptScanner
 
-V8JavaScriptScanner::V8JavaScriptScanner() : JavaScriptScanner() { }
-
 
 void V8JavaScriptScanner::Initialize(UC16CharacterStream* source) {
   source_ = source;
@@ -344,7 +345,8 @@ void V8JavaScriptScanner::Initialize(UC16CharacterStream* source) {
 // ----------------------------------------------------------------------------
 // JsonScanner
 
-JsonScanner::JsonScanner() : Scanner() { }
+JsonScanner::JsonScanner(UnicodeCache* unicode_cache)
+    : Scanner(unicode_cache) { }
 
 
 void JsonScanner::Initialize(UC16CharacterStream* source) {
@@ -558,7 +560,8 @@ Token::Value JsonScanner::ScanJsonNumber() {
   }
   literal.Complete();
   ASSERT_NOT_NULL(next_.literal_chars);
-  number_ = StringToDouble(next_.literal_chars->ascii_literal(),
+  number_ = StringToDouble(unicode_cache_,
+                           next_.literal_chars->ascii_literal(),
                            NO_FLAGS,  // Hex, octal or trailing junk.
                            OS::nan_value());
   return Token::NUMBER;
@@ -573,11 +576,10 @@ Token::Value JsonScanner::ScanJsonIdentifier(const char* text,
     Advance();
     text++;
   }
-  if (ScannerConstants::kIsIdentifierPart.get(c0_)) return Token::ILLEGAL;
+  if (unicode_cache_->IsIdentifierPart(c0_)) return Token::ILLEGAL;
   literal.Complete();
   return token;
 }
-
 
 
 } }  // namespace v8::internal

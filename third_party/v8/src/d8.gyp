@@ -38,7 +38,10 @@
         '../src',
       ],
       'defines': [
+        'ENABLE_LOGGING_AND_PROFILING',
         'ENABLE_DEBUGGER_SUPPORT',
+        'ENABLE_VMSTATE_TRACKING',
+        'V8_FAST_TLS',
       ],
       'sources': [
         'd8.cc',
@@ -58,6 +61,7 @@
       'variables': {
         'js_files': [
           'd8.js',
+          'macros.py',
         ],
       },
       'actions': [
@@ -69,7 +73,6 @@
           ],
           'outputs': [
             '<(SHARED_INTERMEDIATE_DIR)/d8-js.cc',
-            '<(SHARED_INTERMEDIATE_DIR)/d8-js-empty.cc',
           ],
           'action': [
             'python',

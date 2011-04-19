@@ -41,6 +41,7 @@
           'ENABLE_LOGGING_AND_PROFILING',
           'ENABLE_DEBUGGER_SUPPORT',
           'ENABLE_VMSTATE_TRACKING',
+          'V8_FAST_TLS',
         ],
         'conditions': [
           ['OS!="mac"', {
@@ -211,38 +212,6 @@
           },
         },
         {
-          'target_name': 'v8_preparser',
-          'include_dirs': [
-            '../../include',
-            '../../src',
-          ],
-          'sources': [
-            '../../src/allocation.cc',
-            '../../src/hashmap.cc',
-            '../../src/preparse-data.cc',
-            '../../src/preparser.cc',
-            '../../src/preparser-api.cc',
-            '../../src/scanner-base.cc',
-            '../../src/token.cc',
-            '../../src/unicode.cc',
-          ],
-          'conditions': [
-            ['OS=="win" and component=="shared_library"', {
-              'sources': [ '../../src/v8preparserdll-main.cc' ],
-              'defines': [ 'BUILDING_V8_SHARED' ],
-              'direct_dependent_settings': {
-                'defines': [ 'USING_V8_SHARED' ]
-              },
-              'type': '<(component)',
-            } , {
-              'type': 'none'
-            }],
-            ['OS!="win"', {
-              'type': '<(library)'
-            }],
-          ]
-        },
-        {
           'target_name': 'v8_snapshot',
           'type': '<(library)',
           'conditions': [
@@ -261,7 +230,8 @@
             '../../src',
           ],
           'sources': [
-            '<(SHARED_INTERMEDIATE_DIR)/libraries-empty.cc',
+            '<(SHARED_INTERMEDIATE_DIR)/libraries.cc',
+            '<(SHARED_INTERMEDIATE_DIR)/experimental-libraries.cc',
             '<(INTERMEDIATE_DIR)/snapshot.cc',
           ],
           'actions': [
@@ -290,6 +260,7 @@
           ],
           'sources': [
             '<(SHARED_INTERMEDIATE_DIR)/libraries.cc',
+            '<(SHARED_INTERMEDIATE_DIR)/experimental-libraries.cc',
             '../../src/snapshot-empty.cc',
           ],
           'conditions': [
@@ -430,11 +401,10 @@
             '../../src/inspector.h',
             '../../src/interpreter-irregexp.cc',
             '../../src/interpreter-irregexp.h',
-            '../../src/jump-target-inl.h',
-            '../../src/jump-target.cc',
-            '../../src/jump-target.h',
             '../../src/jsregexp.cc',
             '../../src/jsregexp.h',
+            '../../src/isolate.cc',
+            '../../src/isolate.h',
             '../../src/list-inl.h',
             '../../src/list.h',
             '../../src/lithium.cc',
@@ -455,7 +425,6 @@
             '../../src/macro-assembler.h',
             '../../src/mark-compact.cc',
             '../../src/mark-compact.h',
-            '../../src/memory.h',
             '../../src/messages.cc',
             '../../src/messages.h',
             '../../src/natives.h',
@@ -466,10 +435,11 @@
             '../../src/objects-visiting.h',
             '../../src/objects.cc',
             '../../src/objects.h',
-            '../../src/oprofile-agent.h',
-            '../../src/oprofile-agent.cc',
             '../../src/parser.cc',
             '../../src/parser.h',
+            '../../src/platform-tls-mac.h',
+            '../../src/platform-tls-win32.h',
+            '../../src/platform-tls.h',
             '../../src/platform.h',
             '../../src/preparse-data.cc',
             '../../src/preparse-data.h',
@@ -491,9 +461,6 @@
             '../../src/regexp-macro-assembler.h',
             '../../src/regexp-stack.cc',
             '../../src/regexp-stack.h',
-            '../../src/register-allocator.h',
-            '../../src/register-allocator-inl.h',
-            '../../src/register-allocator.cc',
             '../../src/rewriter.cc',
             '../../src/rewriter.h',
             '../../src/runtime.cc',
@@ -513,6 +480,7 @@
             '../../src/serialize.cc',
             '../../src/serialize.h',
             '../../src/shell.h',
+            '../../src/small-pointer-list.h',
             '../../src/smart-pointer.h',
             '../../src/snapshot-common.cc',
             '../../src/snapshot.h',
@@ -546,6 +514,7 @@
             '../../src/v8.h',
             '../../src/v8checks.h',
             '../../src/v8globals.h',
+            '../../src/v8memory.h',
             '../../src/v8threads.cc',
             '../../src/v8threads.h',
             '../../src/v8utils.h',
@@ -553,9 +522,6 @@
             '../../src/variables.h',
             '../../src/version.cc',
             '../../src/version.h',
-            '../../src/virtual-frame-inl.h',
-            '../../src/virtual-frame.cc',
-            '../../src/virtual-frame.h',
             '../../src/vm-state-inl.h',
             '../../src/vm-state.h',
             '../../src/zone-inl.h',
@@ -572,11 +538,6 @@
                 '../../src/arm',
               ],
               'sources': [
-                '../../src/jump-target-light.h',
-                '../../src/jump-target-light-inl.h',
-                '../../src/jump-target-light.cc',
-                '../../src/virtual-frame-light-inl.h',
-                '../../src/virtual-frame-light.cc',
                 '../../src/arm/assembler-arm-inl.h',
                 '../../src/arm/assembler-arm.cc',
                 '../../src/arm/assembler-arm.h',
@@ -595,21 +556,18 @@
                 '../../src/arm/frames-arm.h',
                 '../../src/arm/full-codegen-arm.cc',
                 '../../src/arm/ic-arm.cc',
-                '../../src/arm/jump-target-arm.cc',
                 '../../src/arm/lithium-arm.cc',
                 '../../src/arm/lithium-arm.h',
                 '../../src/arm/lithium-codegen-arm.cc',
                 '../../src/arm/lithium-codegen-arm.h',
+                '../../src/arm/lithium-gap-resolver-arm.cc',
+                '../../src/arm/lithium-gap-resolver-arm.h',
                 '../../src/arm/macro-assembler-arm.cc',
                 '../../src/arm/macro-assembler-arm.h',
                 '../../src/arm/regexp-macro-assembler-arm.cc',
                 '../../src/arm/regexp-macro-assembler-arm.h',
-                '../../src/arm/register-allocator-arm.cc',
                 '../../src/arm/simulator-arm.cc',
                 '../../src/arm/stub-cache-arm.cc',
-                '../../src/arm/virtual-frame-arm-inl.h',
-                '../../src/arm/virtual-frame-arm.cc',
-                '../../src/arm/virtual-frame-arm.h',
               ],
               'conditions': [
                 # The ARM assembler assumes the host is 32 bits,
@@ -625,11 +583,6 @@
                 '../../src/ia32',
               ],
               'sources': [
-                '../../src/jump-target-heavy.h',
-                '../../src/jump-target-heavy-inl.h',
-                '../../src/jump-target-heavy.cc',
-                '../../src/virtual-frame-heavy-inl.h',
-                '../../src/virtual-frame-heavy.cc',
                 '../../src/ia32/assembler-ia32-inl.h',
                 '../../src/ia32/assembler-ia32.cc',
                 '../../src/ia32/assembler-ia32.h',
@@ -646,7 +599,6 @@
                 '../../src/ia32/frames-ia32.h',
                 '../../src/ia32/full-codegen-ia32.cc',
                 '../../src/ia32/ic-ia32.cc',
-                '../../src/ia32/jump-target-ia32.cc',
                 '../../src/ia32/lithium-codegen-ia32.cc',
                 '../../src/ia32/lithium-codegen-ia32.h',
                 '../../src/ia32/lithium-gap-resolver-ia32.cc',
@@ -657,10 +609,7 @@
                 '../../src/ia32/macro-assembler-ia32.h',
                 '../../src/ia32/regexp-macro-assembler-ia32.cc',
                 '../../src/ia32/regexp-macro-assembler-ia32.h',
-                '../../src/ia32/register-allocator-ia32.cc',
                 '../../src/ia32/stub-cache-ia32.cc',
-                '../../src/ia32/virtual-frame-ia32.cc',
-                '../../src/ia32/virtual-frame-ia32.h',
               ],
             }],
             ['v8_target_arch=="x64" or v8_target_arch=="mac" or OS=="mac"', {
@@ -668,11 +617,6 @@
                 '../../src/x64',
               ],
               'sources': [
-                '../../src/jump-target-heavy.h',
-                '../../src/jump-target-heavy-inl.h',
-                '../../src/jump-target-heavy.cc',
-                '../../src/virtual-frame-heavy-inl.h',
-                '../../src/virtual-frame-heavy.cc',
                 '../../src/x64/assembler-x64-inl.h',
                 '../../src/x64/assembler-x64.cc',
                 '../../src/x64/assembler-x64.h',
@@ -689,7 +633,6 @@
                 '../../src/x64/frames-x64.h',
                 '../../src/x64/full-codegen-x64.cc',
                 '../../src/x64/ic-x64.cc',
-                '../../src/x64/jump-target-x64.cc',
                 '../../src/x64/lithium-codegen-x64.cc',
                 '../../src/x64/lithium-codegen-x64.h',
                 '../../src/x64/lithium-gap-resolver-x64.cc',
@@ -700,10 +643,7 @@
                 '../../src/x64/macro-assembler-x64.h',
                 '../../src/x64/regexp-macro-assembler-x64.cc',
                 '../../src/x64/regexp-macro-assembler-x64.h',
-                '../../src/x64/register-allocator-x64.cc',
                 '../../src/x64/stub-cache-x64.cc',
-                '../../src/x64/virtual-frame-x64.cc',
-                '../../src/x64/virtual-frame-x64.h',
               ],
             }],
             ['OS=="linux"', {
@@ -784,6 +724,10 @@
               '../../src/regexp.js',
               '../../src/macros.py',
             ],
+	    'experimental_library_files': [
+	      '../../src/proxy.js',
+              '../../src/macros.py',
+	    ],
           },
           'actions': [
             {
@@ -794,7 +738,6 @@
               ],
               'outputs': [
                 '<(SHARED_INTERMEDIATE_DIR)/libraries.cc',
-                '<(SHARED_INTERMEDIATE_DIR)/libraries-empty.cc',
               ],
               'action': [
                 'python',
@@ -802,6 +745,23 @@
                 '<@(_outputs)',
                 'CORE',
                 '<@(library_files)'
+              ],
+            },
+	    {
+              'action_name': 'js2c_experimental',
+              'inputs': [
+                '../../tools/js2c.py',
+                '<@(experimental_library_files)',
+              ],
+              'outputs': [
+                '<(SHARED_INTERMEDIATE_DIR)/experimental-libraries.cc',
+              ],
+              'action': [
+                'python',
+                '../../tools/js2c.py',
+                '<@(_outputs)',
+                'EXPERIMENTAL',
+                '<@(experimental_library_files)'
               ],
             },
           ],

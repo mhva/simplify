@@ -1,4 +1,4 @@
-// Copyright 2010 the V8 project authors. All rights reserved.
+// Copyright 2011 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -274,12 +274,6 @@ class FullCodeGenerator: public AstVisitor {
     ForwardBailoutStack* const parent_;
   };
 
-  enum ConstantOperand {
-    kNoConstants,
-    kLeftConstant,
-    kRightConstant
-  };
-
   // Type of a member function that generates inline code for a native function.
   typedef void (FullCodeGenerator::*InlineFunctionGenerator)
       (ZoneList<Expression*>*);
@@ -297,11 +291,6 @@ class FullCodeGenerator: public AstVisitor {
   // Determine whether or not to inline the smi case for the given
   // operation.
   bool ShouldInlineSmiCase(Token::Value op);
-
-  // Compute which (if any) of the operands is a compile-time constant.
-  ConstantOperand GetConstantOperand(Token::Value op,
-                                     Expression* left,
-                                     Expression* right);
 
   // Helper function to convert a pure value into a test context.  The value
   // is expected on the stack or the accumulator, depending on the platform.
@@ -432,6 +421,14 @@ class FullCodeGenerator: public AstVisitor {
                                        Label* done);
   void EmitVariableLoad(Variable* expr);
 
+  enum ResolveEvalFlag {
+    SKIP_CONTEXT_LOOKUP,
+    PERFORM_CONTEXT_LOOKUP
+  };
+
+  // Expects the arguments and the function already pushed.
+  void EmitResolvePossiblyDirectEval(ResolveEvalFlag flag, int arg_count);
+
   // Platform-specific support for allocating a new closure based on
   // the given function info.
   void EmitNewClosure(Handle<SharedFunctionInfo> info, bool pretenure);
@@ -448,43 +445,17 @@ class FullCodeGenerator: public AstVisitor {
 
   // Apply the compound assignment operator. Expects the left operand on top
   // of the stack and the right one in the accumulator.
-  void EmitBinaryOp(Token::Value op,
+  void EmitBinaryOp(BinaryOperation* expr,
+                    Token::Value op,
                     OverwriteMode mode);
 
   // Helper functions for generating inlined smi code for certain
   // binary operations.
-  void EmitInlineSmiBinaryOp(Expression* expr,
+  void EmitInlineSmiBinaryOp(BinaryOperation* expr,
                              Token::Value op,
                              OverwriteMode mode,
                              Expression* left,
-                             Expression* right,
-                             ConstantOperand constant);
-
-  void EmitConstantSmiBinaryOp(Expression* expr,
-                               Token::Value op,
-                               OverwriteMode mode,
-                               bool left_is_constant_smi,
-                               Smi* value);
-
-  void EmitConstantSmiBitOp(Expression* expr,
-                            Token::Value op,
-                            OverwriteMode mode,
-                            Smi* value);
-
-  void EmitConstantSmiShiftOp(Expression* expr,
-                              Token::Value op,
-                              OverwriteMode mode,
-                              Smi* value);
-
-  void EmitConstantSmiAdd(Expression* expr,
-                          OverwriteMode mode,
-                          bool left_is_constant_smi,
-                          Smi* value);
-
-  void EmitConstantSmiSub(Expression* expr,
-                          OverwriteMode mode,
-                          bool left_is_constant_smi,
-                          Smi* value);
+                             Expression* right);
 
   // Assign to the given expression as if via '='. The right-hand-side value
   // is expected in the accumulator.
@@ -531,8 +502,9 @@ class FullCodeGenerator: public AstVisitor {
 
   Handle<Script> script() { return info_->script(); }
   bool is_eval() { return info_->is_eval(); }
+  bool is_strict_mode() { return function()->strict_mode(); }
   StrictModeFlag strict_mode_flag() {
-    return function()->strict_mode() ? kStrictMode : kNonStrictMode;
+    return is_strict_mode() ? kStrictMode : kNonStrictMode;
   }
   FunctionLiteral* function() { return info_->function(); }
   Scope* scope() { return info_->scope(); }
@@ -541,11 +513,16 @@ class FullCodeGenerator: public AstVisitor {
   static Register context_register();
 
   // Helper for calling an IC stub.
-  void EmitCallIC(Handle<Code> ic, RelocInfo::Mode mode);
+  void EmitCallIC(Handle<Code> ic,
+                  RelocInfo::Mode mode,
+                  unsigned ast_id = AstNode::kNoNumber);
 
   // Calling an IC stub with a patch site. Passing NULL for patch_site
-  // indicates no inlined smi code and emits a nop after the IC call.
-  void EmitCallIC(Handle<Code> ic, JumpPatchSite* patch_site);
+  // or non NULL patch_site which is not activated indicates no inlined smi code
+  // and emits a nop after the IC call.
+  void EmitCallIC(Handle<Code> ic,
+                  JumpPatchSite* patch_site,
+                  unsigned ast_id = AstNode::kNoNumber);
 
   // Set fields in the stack frame. Offsets are the frame pointer relative
   // offsets defined in, e.g., StandardFrameConstants.
@@ -580,6 +557,8 @@ class FullCodeGenerator: public AstVisitor {
     virtual ~ExpressionContext() {
       codegen_->set_new_context(old_);
     }
+
+    Isolate* isolate() const { return codegen_->isolate(); }
 
     // Convert constant control flow (true or false) to the result expected for
     // this expression context.
