@@ -39,6 +39,7 @@
 #include <simplify/error.hh>
 #include <simplify/utils.hh>
 
+#include "eucjp_ucs2.hh"
 #include "defaultjs.hh"
 #include "epwing-dictionary.hh"
 
@@ -378,18 +379,6 @@ enum class Charset {
     Ucs2
 };
 
-struct HookContext {
-    struct ByteRange {
-        Charset charset;
-        size_t offset;
-        size_t length;
-    };
-
-    std::vector<ByteRange> byte_ranges;
-    size_t buffer_length;
-    v8::Persistent<v8::Function> *js_functions;
-};
-
 class ExternalUcs2String : public v8::String::ExternalStringResource {
 public:
     ExternalUcs2String(const uint16_t *string, size_t length)
@@ -607,31 +596,13 @@ public:
         v8::HandleScope handle_scope;
         v8::Context::Scope context_scope(js_context_);
 
-        struct HookContext write_context;
-        write_context.byte_ranges.reserve(6);
-        write_context.buffer_length = 0;
-        write_context.js_functions = js_functions_;
-
-        // Read dictionary text into temporary buffer. The buffer might
-        // contain char ranges with varying character encodings. Each
-        // range is described in the HookContext::byte_ranges vector.
-        // This vector will be populated by our hook functions.
-        //
-        // Q: Why not convert everything to UCS-2 on the fly?
-        // A: Libeb allows us to write only 1 character at time, invoking
-        //    iconv for every character adds a large performance overhead.
-        //    To mitigate this, characters are being copied to buffer verbatim,
-        //    for each sequence of characters with same encoding we store a
-        //    descriptor which will be used later to encode associated
-        //    character sequence to UCS-2.
-        char tmp_buffer[buffer_size];
         ssize_t text_length;
         EB_Error_Code eb_code = (*function)(&book_,
                                             NULL,
                                             &hookset,
-                                            &write_context,
-                                            sizeof(tmp_buffer) - 1,
-                                            tmp_buffer,
+                                            js_functions_,
+                                            buffer_size,
+                                            buffer,
                                             &text_length);
         if (eb_code != EB_SUCCESS) {
             error = make_error_code(static_cast<eb_error>(eb_code));
@@ -642,54 +613,7 @@ public:
             return -1;
         }
 
-        // Convert text in the temporary buffer to UCS-2.
-        size_t write_offset = 0;
-        for (auto it = write_context.byte_ranges.begin();
-             it != write_context.byte_ranges.end();
-             ++it) {
-            size_t bytes_written;
-
-            assert(write_offset % 2 == 0);
-
-            switch ((*it).charset) {
-                case Charset::Iso8859_1:
-                    bytes_written = ConvertIso8859_1ToUcs2(
-                            tmp_buffer + (*it).offset, (*it).length,
-                            buffer + write_offset, buffer_size - write_offset,
-                            error);
-                    break;
-                case Charset::JisX0208:
-                    bytes_written = ConvertEucJpToUcs2(
-                            tmp_buffer + (*it).offset, (*it).length,
-                            buffer + write_offset, buffer_size - write_offset,
-                            error);
-                    break;
-                case Charset::Gb2312:
-                    bytes_written = ConvertGb2312ToUcs2(
-                            tmp_buffer + (*it).offset, (*it).length,
-                            buffer + write_offset, buffer_size - write_offset,
-                            error);
-                    break;
-                case Charset::Ucs2:
-                    bytes_written = (*it).length;
-                    if (write_offset + bytes_written > buffer_size) {
-                        error =
-                            make_error_code(simplify_error::buffer_exhausted);
-                        return -1;
-                    }
-
-                    memcpy(buffer + write_offset, tmp_buffer + (*it).offset,
-                           bytes_written);
-                    break;
-            }
-
-            if (!error)
-                write_offset += bytes_written;
-            else
-                return -1;
-        }
-
-        return write_offset;
+        return text_length;
     }
 
 
@@ -1173,49 +1097,19 @@ std::error_code EpwingDictionary::Initialize()
     return last_error;
 }
 
-inline static EB_Error_Code WriteByteRange(EB_Book *book, HookContext *context,
-                                           Charset charset,
-                                           const char *string, size_t length)
+static EB_Error_Code WriteJs(EB_Book *book, void *hook_arg, JsFunction function,
+                             int argc, v8::Handle<v8::Value> *argv)
 {
-    if (length == 0) {
-        return EB_SUCCESS;
-    }
-
-    // Start new byte range descriptor if the given string doesn't have the
-    // same charset as the charset of the previous byte range.
-    if (context->byte_ranges.empty() ||
-        context->byte_ranges.back().charset != charset) {
-
-        context->byte_ranges.push_back(HookContext::ByteRange());
-
-        HookContext::ByteRange &byte_range = context->byte_ranges.back();
-        byte_range.charset = charset;
-        byte_range.offset = context->buffer_length;
-    }
-
-    EB_Error_Code eb_code = eb_write_text(book, string, length);
-
-    if (eb_code == EB_SUCCESS) {
-        context->byte_ranges.back().length += length;
-        context->buffer_length += length;
-    }
-
-    return eb_code;
-}
-
-inline static EB_Error_Code WriteJs(EB_Book *book, HookContext *context,
-                                    JsFunction function,
-                                    int argc, v8::Handle<v8::Value> *argv)
-{
-    size_t fn_index = static_cast<size_t>(function);
-
-    assert(!context->js_functions[fn_index].IsEmpty() &&
-           context->js_functions[fn_index]->IsFunction());
-
     using namespace v8;
+
+    size_t fn_index = static_cast<size_t>(function);
+    Persistent<Function> &fn =
+        reinterpret_cast<Persistent<Function> *>(hook_arg)[fn_index];
+
+    assert(!fn.IsEmpty() && fn->IsFunction());
+
     Handle<Value> result =
-        context->js_functions[fn_index]->Call(Context::GetEntered()->Global(),
-                                              argc, argv);
+        fn->Call(Context::GetEntered()->Global(), argc, argv);
 
     if (!result.IsEmpty() && result->IsString()) {
         Handle<String> string = result.As<String>();
@@ -1225,18 +1119,17 @@ inline static EB_Error_Code WriteJs(EB_Book *book, HookContext *context,
         // Even though the v8 documentation states that the value returned
         // from the String::Write() method is the number of bytes written,
         // in reality though, it's the number of characters written.
-        return WriteByteRange(book, context, Charset::Ucs2,
-                              reinterpret_cast<char *>(chars),
-                              copied * sizeof(uint16_t));
+        return eb_write_text(book, reinterpret_cast<char *>(chars),
+                             copied * sizeof(uint16_t));
     } else {
         return EB_SUCCESS;
     }
 }
 
-inline static EB_Error_Code WriteJs(EB_Book *book, HookContext *context,
+inline static EB_Error_Code WriteJs(EB_Book *book, void *hook_arg,
                                     JsFunction function)
 {
-    return WriteJs(book, context, function, 0, NULL);
+    return WriteJs(book, hook_arg, function, 0, NULL);
 }
 
 static EB_Error_Code HandleIso8859_1(EB_Book *book, EB_Appendix *, void *arg,
@@ -1244,11 +1137,8 @@ static EB_Error_Code HandleIso8859_1(EB_Book *book, EB_Appendix *, void *arg,
                                      const unsigned int *argv)
 {
     // FIXME: Broken on big-endian machines.
-    return WriteByteRange(book,
-                          reinterpret_cast<HookContext *>(arg),
-                          Charset::Iso8859_1,
-                          reinterpret_cast<const char *>(&argv[0]),
-                          1);
+    char ucs2[2] = { (char)argv[0], 0 };
+    return eb_write_text(book, ucs2, sizeof(ucs2));
 }
 
 static EB_Error_Code HandleJisX0208(EB_Book *book, EB_Appendix *, void *arg,
@@ -1256,67 +1146,71 @@ static EB_Error_Code HandleJisX0208(EB_Book *book, EB_Appendix *, void *arg,
                                     const unsigned int *argv)
 {
     // FIXME: Broken on big-endian machines.
-    unsigned int c = __builtin_bswap32(argv[0]);
+    unsigned int c = argv[0];
     size_t size = ((c & 0xff000000) != 0) + ((c & 0x00ff0000) != 0) + \
                   ((c & 0x0000ff00) != 0) + ((c & 0x000000ff) != 0);
 
-    return WriteByteRange(book,
-                          reinterpret_cast<HookContext *>(arg),
-                          Charset::JisX0208,
-                          reinterpret_cast<const char *>(&c) + sizeof(c) - size,
-                          size);
+    switch (size) {
+    case 2: {
+        unsigned int hi = (c & 0xff00) >> 8;
+        unsigned int lo = c & 0x00ff;
+        ConversionEntry *range;
+
+        if (hi >= 0xa1 && hi <= 0xfe && lo >= 0xa1 && lo <= 0xfe)
+            range = &g_eucjp_to_ucs2_codeset1_ranges[hi - 0xa1][lo - 0xa1];
+        else if (hi == 0x8e && lo >= 0xa1 && lo <= 0xdf)
+            range = &g_eucjp_to_ucs2_codeset2[lo - 0xa1];
+        else
+            return eb_write_text(book, "[?]", 3);
+
+        if (range->ucs2 != NULL)
+            return eb_write_text(book, range->ucs2, range->ucs2_length);
+        else
+            return eb_write_text(book, "[?]", 3);
+    }
+    case 1: {
+        char ucs2[2] = { (char)c, 0 };
+        return eb_write_text(book, ucs2, sizeof(ucs2));
+    }
+    default:
+        return eb_write_text(book, "[?]", 3);
+    }
 }
 
 static EB_Error_Code HandleGb2312(EB_Book *book, EB_Appendix *, void *arg,
                                   EB_Hook_Code, int argc,
                                   const unsigned int *argv)
 {
-    // FIXME: Broken on big-endian machines.
-    unsigned int c = __builtin_bswap32(argv[0]);
-    size_t size = ((c & 0xff000000) != 0) + ((c & 0x00ff0000) != 0) + \
-                  ((c & 0x0000ff00) != 0) + ((c & 0x000000ff) != 0);
-
-    return WriteByteRange(book,
-                          reinterpret_cast<HookContext *>(arg),
-                          Charset::Gb2312,
-                          reinterpret_cast<const char *>(&c) + sizeof(c) - size,
-                          size);
+    printf("HandleGb2312() not implemented.\n");
+    return EB_SUCCESS;
 }
 
 static EB_Error_Code HandleBeginSub(EB_Book *book, EB_Appendix *, void *arg,
                                     EB_Hook_Code, int argc,
                                     const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::BeginSubscript);
+    return WriteJs(book, arg, JsFunction::BeginSubscript);
 }
 
 static EB_Error_Code HandleEndSub(EB_Book *book, EB_Appendix *, void *arg,
                                   EB_Hook_Code, int argc,
                                   const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::EndSubscript);
+    return WriteJs(book, arg, JsFunction::EndSubscript);
 }
 
 static EB_Error_Code HandleBeginSup(EB_Book *book, EB_Appendix *, void *arg,
                                     EB_Hook_Code, int argc,
                                     const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::BeginSuperscript);
+    return WriteJs(book, arg, JsFunction::BeginSuperscript);
 }
 
 static EB_Error_Code HandleEndSup(EB_Book *book, EB_Appendix *, void *arg,
                                   EB_Hook_Code, int argc,
                                   const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::EndSuperscript);
+    return WriteJs(book, arg, JsFunction::EndSuperscript);
 }
 
 static EB_Error_Code HandleIndent(EB_Book *book, EB_Appendix *, void *arg,
@@ -1324,65 +1218,50 @@ static EB_Error_Code HandleIndent(EB_Book *book, EB_Appendix *, void *arg,
                                   const unsigned int *argv)
 {
     v8::Handle<v8::Value> v8argv[] = { v8::Uint32::New(argv[1]) };
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::Indent,
-                   sizeof(v8argv) / sizeof(v8argv[0]),
-                   v8argv);
+    return WriteJs(book, arg, JsFunction::Indent,
+                   sizeof(v8argv) / sizeof(v8argv[0]), v8argv);
 }
 
 static EB_Error_Code HandleNewline(EB_Book *book, EB_Appendix *, void *arg,
                                    EB_Hook_Code, int argc,
                                    const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::Newline);
+    return WriteJs(book, arg, JsFunction::Newline);
 }
 
 static EB_Error_Code HandleBeginNoBr(EB_Book *book, EB_Appendix *, void *arg,
                                      EB_Hook_Code, int argc,
                                      const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::BeginNoBreak);
+    return WriteJs(book, arg, JsFunction::BeginNoBreak);
 }
 
 static EB_Error_Code HandleEndNoBr(EB_Book *book, EB_Appendix *, void *arg,
                                    EB_Hook_Code, int argc,
                                    const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::EndNoBreak);
+    return WriteJs(book, arg, JsFunction::EndNoBreak);
 }
 
 static EB_Error_Code HandleBeginEm(EB_Book *book, EB_Appendix *, void *arg,
                                    EB_Hook_Code, int argc,
                                    const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::BeginEmphasis);
+    return WriteJs(book, arg, JsFunction::BeginEmphasis);
 }
 
 static EB_Error_Code HandleEndEm(EB_Book *book, EB_Appendix *, void *arg,
                                  EB_Hook_Code, int argc,
                                  const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::EndEmphasis);
+    return WriteJs(book, arg, JsFunction::EndEmphasis);
 }
 
 static EB_Error_Code HandleBeginReference(EB_Book *book, EB_Appendix *,
                                           void *arg, EB_Hook_Code, int argc,
                                           const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::BeginReference);
+    return WriteJs(book, arg, JsFunction::BeginReference);
 }
 
 static EB_Error_Code HandleEndReference(EB_Book *book, EB_Appendix *,
@@ -1394,47 +1273,36 @@ static EB_Error_Code HandleEndReference(EB_Book *book, EB_Appendix *,
         v8::Int32::New(argv[2])
     };
 
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::EndReference,
-                   sizeof(v8argv) / sizeof(v8argv[0]),
-                   v8argv);
+    return WriteJs(book, arg, JsFunction::EndReference,
+                   sizeof(v8argv) / sizeof(v8argv[0]), v8argv);
 }
 
 static EB_Error_Code HandleBeginKeyword(EB_Book *book, EB_Appendix *,
                                         void *arg, EB_Hook_Code, int argc,
                                         const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::BeginKeyword);
+    return WriteJs(book, arg, JsFunction::BeginKeyword);
 }
 
 static EB_Error_Code HandleEndKeyword(EB_Book *book, EB_Appendix *, void *arg,
                                       EB_Hook_Code, int argc,
                                       const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::EndKeyword);
+    return WriteJs(book, arg, JsFunction::EndKeyword);
 }
 
 static EB_Error_Code HandleBeginDecoration(EB_Book *book, EB_Appendix *,
                                            void *arg, EB_Hook_Code, int argc,
                                            const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::BeginDecoration);
+    return WriteJs(book, arg, JsFunction::BeginDecoration);
 }
 
 static EB_Error_Code HandleEndDecoration(EB_Book *book, EB_Appendix *,
                                          void *arg, EB_Hook_Code, int argc,
                                          const unsigned int *argv)
 {
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::EndDecoration);
+    return WriteJs(book, arg, JsFunction::EndDecoration);
 }
 
 static EB_Error_Code HandleInsertHGaiji(EB_Book *book, EB_Appendix *,
@@ -1445,11 +1313,8 @@ static EB_Error_Code HandleInsertHGaiji(EB_Book *book, EB_Appendix *,
         v8::Uint32::New(argv[0])
     };
 
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::InsertHeadingGaiji,
-                   sizeof(v8argv) / sizeof(v8argv[0]),
-                   v8argv);
+    return WriteJs(book, arg, JsFunction::InsertHeadingGaiji,
+                   sizeof(v8argv) / sizeof(v8argv[0]), v8argv);
 }
 
 static EB_Error_Code HandleInsertTGaiji(EB_Book *book, EB_Appendix *,
@@ -1460,11 +1325,8 @@ static EB_Error_Code HandleInsertTGaiji(EB_Book *book, EB_Appendix *,
         v8::Uint32::New(argv[0])
     };
 
-    return WriteJs(book,
-                   reinterpret_cast<HookContext *>(arg),
-                   JsFunction::InsertTextGaiji,
-                   sizeof(v8argv) / sizeof(v8argv[0]),
-                   v8argv);
+    return WriteJs(book, arg, JsFunction::InsertTextGaiji,
+                   sizeof(v8argv) / sizeof(v8argv[0]), v8argv);
 }
 
 }  // namespace simplify
