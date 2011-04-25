@@ -1,11 +1,8 @@
 {
-  'variables': {
-    'libeb_library_type%': 'static_library'
-  },
   'targets': [
     {
       'target_name': 'libeb',
-      'type': '<(libeb_library_type)',
+      'type': 'static_library',
       'configurations': {
         'Debug': {
           'conditions': [
