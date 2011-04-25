@@ -27,6 +27,38 @@
 
 namespace simplifyd {
 
+struct HttpHeader {
+    char *name;
+    char *value;
+};
+
+static HttpHeader *NewHeader(const char *name, size_t name_length,
+                             const char *value, size_t value_length)
+{
+    // We pack header into one big memory chunk. Headers aren't very
+    // frequently modified so we can improve effectiveness by avoiding
+    // some memory allocations.
+    struct MemoryLayout {
+        HttpHeader header;
+        char appendix[];
+    } *memory;
+
+    memory = static_cast<MemoryLayout *>(
+            malloc(sizeof(MemoryLayout) + name_length + value_length + 2));
+
+    memory->header.name = memory->appendix;
+    memory->header.value = memory->appendix + name_length + 1;
+    memcpy(memory->header.name, name, name_length + 1);
+    memcpy(memory->header.value, value, value_length + 1);
+
+    return &memory->header;
+}
+
+static void DeleteHeader(HttpHeader *header)
+{
+    free(header);
+}
+
 static const char *GetStatusCodeText(HttpStatusCode status_code)
 {
     switch (status_code) {
@@ -159,35 +191,6 @@ std::string HttpResponse::ProduceResponse() const
     response.append(body_);
 
     return response;
-}
-
-HttpResponse::HttpHeader *HttpResponse::NewHeader(const char *name,
-                                                  size_t name_length,
-                                                  const char *value,
-                                                  size_t value_length)
-{
-    // We pack header into one big memory chunk. Headers aren't very
-    // frequently modified so we can improve effectiveness by avoiding
-    // some memory allocations.
-    struct MemoryLayout {
-        HttpHeader header;
-        char appendix[];
-    } *memory;
-
-    memory = static_cast<MemoryLayout *>(
-            malloc(sizeof(MemoryLayout) + name_length + value_length + 2));
-
-    memory->header.name = memory->appendix;
-    memory->header.value = memory->appendix + name_length + 1;
-    memcpy(memory->header.name, name, name_length + 1);
-    memcpy(memory->header.value, value, value_length + 1);
-
-    return &memory->header;
-}
-
-void HttpResponse::DeleteHeader(HttpHeader *header)
-{
-    free(header);
 }
 
 }  // namespace simplifyd

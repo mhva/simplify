@@ -34,6 +34,7 @@ enum class HttpVersion {
     Http1_1
 };
 
+struct HttpHeader;
 class HttpResponse {
 public:
     HttpResponse();
@@ -49,18 +50,6 @@ public:
     const std::string &GetBody() const;
 
     std::string ProduceResponse() const;
-
-private:
-    struct HttpHeader {
-        char *name;
-        char *value;
-    };
-
-    static HttpHeader *NewHeader(const char *name,
-                                 size_t name_length,
-                                 const char *value,
-                                 size_t value_length);
-    static void DeleteHeader(HttpHeader *header);
 
 private:
     HttpVersion http_version_;
