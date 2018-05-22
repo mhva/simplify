@@ -2,6 +2,9 @@
 *.pyc
 *.mk
 .DS_Store
+.directory
+.vscode/
+CMakeLists.txt.user
 third_party/depot_tools/
 third_party/v8/
 third_party/.gclient*
