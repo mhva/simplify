@@ -21,8 +21,8 @@
 #ifndef SIMPLIFYD_SERVER_HH_
 #define SIMPLIFYD_SERVER_HH_
 
-#include <string.h>
-
+#include <cstring>
+#include <memory>
 #include <system_error>
 #include <unordered_map>
 
@@ -43,7 +43,7 @@ struct QueryParam {
 
 class Server {
 public:
-    Server(simplify::Repository *repository);
+    Server(std::shared_ptr<simplify::Repository> repository);
     ~Server();
 
     void AddRoute(const char *name, Action *action);
@@ -59,7 +59,7 @@ private:
         RouteMap;
 
     mg_context *srv_;
-    simplify::Repository *repository_;
+    std::shared_ptr<simplify::Repository> repository_;
     RouteMap routes_;
 };
 

@@ -39,7 +39,7 @@ namespace simplifyd {
 
 static Server *g_server_instance = NULL;
 
-Server::Server(simplify::Repository *repository) :
+Server::Server(std::shared_ptr<simplify::Repository> repository) :
     srv_(NULL),
     repository_(repository),
     routes_(100)
@@ -51,7 +51,6 @@ Server::~Server()
     std::for_each(routes_.begin(), routes_.end(), [](RouteMap::value_type &v) {
         delete v.second;
     });
-    delete repository_;
 }
 
 void Server::AddRoute(const char *name, Action *action)
@@ -93,10 +92,8 @@ bool Server::Start(const Options &options)
     srv_ = mg_start(&Server::Trampoline, mg_options);
     g_server_instance = NULL;
 
-    if (srv_)
-        return true;
-    else
-        return false;
+    // FIXME: seriously.
+    return srv_ != nullptr;
 }
 
 void *Server::Trampoline(mg_event event, mg_connection *conn,

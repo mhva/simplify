@@ -24,37 +24,76 @@
 #include <string>
 #include <vector>
 
+#include <simplify/json_fwd.hh>
 #include <simplify/dictionary.hh>
 
 namespace simplify {
 
 class EpwingDictionary : public Dictionary {
 public:
-    ~EpwingDictionary();
+    virtual ~EpwingDictionary();
 
+    /**
+     * Selects a sub-book within dictionary.
+     *
+     * \param index Sub-book index.
+     */
+    std::error_code SelectSubBook(int index);
+
+    /**
+     * Returns a list of names of each sub-book within this dictionary.
+     */
     Likely<std::vector<std::string>> ListSubBooks() const;
-    std::error_code SelectSubBook(size_t index);
 
-    Likely<SearchResults *> Search(const char *expr, size_t limit);
+    /**
+     * Creates new EpwingDictionary dictionary instance.
+     *
+     * \param name User-facing name of the dictionary.
+     * \param path Path to dictionary.
+     * \param script_path Path to custom script file (can be null).
+     */
+    static Likely<EpwingDictionary *>
+        New(const char *name, const char *path, const char *script_path);
 
-    Likely<size_t> ReadText(const char *guid, char **ptr);
-    Likely<size_t> ReadText(const char *guid, char *buffer, size_t buffer_size);
-
-    static Likely<EpwingDictionary *> New(const char *path, Config *conf);
-    static Likely<EpwingDictionary *> New(Config *conf);
-
-private:
-    EpwingDictionary(Config *conf);
-
-    std::error_code Initialize();
-    Likely<SearchResults *> GetResults(size_t max_count);
+    /**
+     * Creates new instance of EpwingDictionary with given state.
+     *
+     * \param name User-facing name of the dictionary.
+     * \param path Path to dictionary.
+     * \param state Dictionary state.
+     */
+    static Likely<EpwingDictionary *>
+        NewWithState(const char *name, const char *path, const nlohmann::json &state);
 
 public:
+    DictionaryType GetType() const override;
+
+    Likely<SearchResults *> Search(const char *expr, size_t limit) override;
+
+    Likely<std::unique_ptr<char[]>>
+        ReadText(const char *guid, size_t *text_length) override;
+
     class Private;
 
 private:
+    explicit EpwingDictionary(const char *name);
+    explicit EpwingDictionary(std::string name);
+
+    std::error_code
+        Initialize(const char *dict_path, const char *script_path,
+                   const nlohmann::json *state);
+
+    Likely<SearchResults *> GetResults(size_t max_count);
+
+private:
+    friend void to_json(nlohmann::json &, const EpwingDictionary *);
+    friend void to_json(nlohmann::json &, const EpwingDictionary &);
+
     Private *d;
 };
+
+void to_json(nlohmann::json &, const EpwingDictionary *);
+void to_json(nlohmann::json &, const EpwingDictionary &);
 
 }  // namespace simplify
 

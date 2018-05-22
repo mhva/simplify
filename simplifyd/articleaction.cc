@@ -41,49 +41,34 @@ void ArticleAction::Handle(simplify::Repository &repository,
 
     response.AddHeader("Content-Type", "application/json; charset=utf-8");
 
-    if (dict_id == NULL) {
+    if (dict_id == nullptr) {
         body.append("{\"error\":\"No dictionary ID specified\"}");
         return;
-    } else if (guid == NULL) {
+    } else if (guid == nullptr) {
         body.append("{\"error\":\"No article GUID specified\"}");
         return;
     }
 
-    simplify::Dictionary *dict =
-        repository.GetDictionaryByIndex(strtol(dict_id, NULL, 10));
+    auto dict = repository.GetDictionary(strtol(dict_id, NULL, 10));
 
-    if (dict == NULL) {
+    if (dict == nullptr) {
         body.append("{\"error\":\"Invalid dictionary index specified\"}");
         return;
     }
 
-    size_t buffer_size = 16 * 1024;
-
-    while (true) {
-        char buffer[buffer_size];
-
-        simplify::Likely<size_t> likely_length =
-            dict->ReadText(guid, buffer, buffer_size);
-
-        if (likely_length) {
-            body.append("{\"article\":\"")
-                .append(buffer, (size_t)likely_length)
-                .append("\"}");
-            break;
-        } else if (likely_length.error_code() ==
-                        simplify::simplify_error::buffer_exhausted) {
-            // Looks like the size of the buffer was not large enough.
-            // Increase it just a tiny little bit and attempt to read the
-            // article again.
-            buffer_size += 4096;
-        } else {
-            // Bail out if something bad happened.
-            body.append("{\"error\":\"An error occurred while retrieving "
-                        "article data from the dictionary: ")
-                .append(likely_length.error_code().message())
-                .append("\"}");
-            return;
-        }
+    size_t text_length = 0;
+    simplify::Likely<std::unique_ptr<char[]>> likely_text =
+        dict->ReadText(guid, &text_length);
+    if (!likely_text.is_error()) {
+      body.append("{\"article\":\"")
+          .append(likely_text.value_checked().get(), text_length)
+          .append("\"}");
+    } else {
+      body.append("{\"error\":\"An error occurred while retrieving "
+                  "article data from the dictionary: ")
+          .append(likely_text.error_code().message())
+          .append("\"}");
+      return;
     }
 
     // FIXME: Bad 'Expires' header.

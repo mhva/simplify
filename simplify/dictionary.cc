@@ -18,37 +18,50 @@
    Fifth Floor, Boston, MA 02110-1301, USA.
 */
 
+#include <utility>
+
+#include "repository.hh"
 #include "dictionary.hh"
 
 namespace simplify {
 
-Dictionary::Dictionary(Config *conf) : conf_(conf)
-{
-}
-
-Dictionary::~Dictionary()
-{
-    delete conf_;
-}
+Dictionary::Dictionary(const char *name) : name_(name) {}
+Dictionary::Dictionary(std::string name) : name_(std::move(name)) {}
+Dictionary::~Dictionary() {}
 
 const char *Dictionary::GetName() const
 {
-    return (*conf_)["Dictionary"].ReadString("name", "");
+    return name_.c_str();
 }
 
 void Dictionary::SetName(const std::string &name)
 {
-    (*conf_)["Dictionary"].WriteString("name", name);
+    name_ = name;
+
+    // Dictionary's name is part of permanent state.
+    SaveState();
 }
 
-Config &Dictionary::GetConfig()
+std::shared_ptr<Repository> Dictionary::GetRepository()
 {
-    return *conf_;
+    return repo_.lock();
 }
 
-const Config &Dictionary::GetConfig() const
+std::shared_ptr<const Repository> Dictionary::GetRepository() const
 {
-    return *conf_;
+    return repo_.lock();
+}
+
+void Dictionary::SetRepository(std::shared_ptr<Repository> repo)
+{
+    repo_ = repo;
+}
+
+std::error_code Dictionary::SaveState()
+{
+    if (auto repo = GetRepository(); repo != nullptr)
+        return repo->SaveState();
+    return simplify_error::success;
 }
 
 }  // namespace simplify

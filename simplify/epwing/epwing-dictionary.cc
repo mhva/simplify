@@ -27,6 +27,8 @@
 #include <cassert>
 #include <cstdio>
 #include <iostream>
+#include <memory>
+#include <sstream>
 #include <string>
 
 #include <eb/eb.h>
@@ -35,7 +37,9 @@
 
 #include <v8.h>
 
-#include <simplify/config.hh>
+#include <nowide/fstream.hpp>
+#include <nlohmann/json.hpp>
+
 #include <simplify/error.hh>
 #include <simplify/utils.hh>
 
@@ -43,8 +47,18 @@
 #include "defaultjs.hh"
 #include "epwing-dictionary.hh"
 
-namespace simplify {
+#define ENTER_ISOLATE(isolate)                     \
+  auto isolate__ = isolate;                        \
+  ::v8::Locker isolate_locker__(isolate__);        \
+  ::v8::Isolate::Scope isolate_scope__(isolate__); \
+  ::v8::HandleScope handle_scope__(isolate__);
+#define ENTER_CONTEXT(context)                     \
+  (void) isolate__;                                \
+  ::v8::Local<v8::Context> js_context__ = context; \
+  ::v8::Context::Scope js_context_scope__{js_context__};
+#define GET_CONTEXT() js_context__
 
+namespace simplify {
 
 static EB_Error_Code HandleIso8859_1(EB_Book *, EB_Appendix *, void *,
                                      EB_Hook_Code, int, const unsigned int *);
@@ -199,30 +213,35 @@ static bool InitializeLibEb(std::error_code &error)
     }
 }
 
-static v8::Persistent<v8::Script> &GetDefaultJsScript()
+static v8::MaybeLocal<v8::Script> CompileBuiltinScript(
+                                      v8::Local<v8::Context> context)
 {
-    using namespace v8;
-
-    static Persistent<Script> script =
-        Persistent<Script>::New(
-                Script::New(String::New(g_default_js_implementation)));
-    return script;
+    v8::MaybeLocal<v8::String> source = v8::String::NewFromUtf8(
+        context->GetIsolate(),
+        g_default_js_implementation,
+        v8::NewStringType::kNormal
+      );
+    if (!source.IsEmpty())
+        return v8::Script::Compile(context, source.ToLocalChecked());
+    else
+        return v8::Local<v8::Script>();
 }
 
 /**
- * Converts the encoding of source string using iconv conversion descriptor @cd.
+ * Converts the encoding of source string using iconv conversion descriptor
+ * \p cd.
  *
  * \param cd iconv conversion descriptor.
  * \param input A pointer to a source string to encode.
- * \param input_size Size of the @input string.
+ * \param input_size Size of the \p input string.
  * \param buffer A pointer to the buffer where resulting string should be
  *  stored.
- * \param buffer_size Size of the buffer pointed by @buffer.
+ * \param buffer_size Size of the buffer pointed by \p buffer.
  * \param error Reference to std::error_code where an error, if any, will be
  *  stored. If encoding succeeds the error state will be cleared.
  *
- * \return If succeeds, returns number of bytes in the @buffer string. If fails,
- *  <em>(size_t) -1</em> will be returned.
+ * \return If succeeds, returns number of bytes in the \p buffer string.
+ * If fails, <em>(size_t) -1</em> will be returned.
  */
 static size_t Iconv(iconv_t cd, const char *input, size_t input_size,
                     char *buffer, size_t buffer_size, std::error_code &error)
@@ -231,7 +250,7 @@ static size_t Iconv(iconv_t cd, const char *input, size_t input_size,
 
     if (cd == (iconv_t) -1) {
         error = make_error_code(static_cast<std::errc>(errno));
-        return -1;
+        return (size_t) -1;
     }
 
     size_t buffer_left = buffer_size;
@@ -256,13 +275,13 @@ static size_t Iconv(iconv_t cd, const char *input, size_t input_size,
         else
             error = make_error_code(static_cast<std::errc>(errno));
 
-        return -1;
+        return (size_t) -1;
     }
 }
 
 /**
- * Encodes source UTF-8 string @input to EUC-JP string and stores it into
- * @buffer with the max size of @buffer_size.
+ * Encodes UTF-8 string \p input to EUC-JP and writes the result into the
+ * \p buffer with the max size of \p buffer_size bytes.
  */
 inline static size_t ConvertUtf8ToEucJp(const char *input, size_t input_size,
                                         char *buffer, size_t buffer_size,
@@ -343,7 +362,7 @@ static size_t PositionToGuid(const EB_Position &pos,
                              size_t buffer_size,
                              std::error_code &error)
 {
-    if (buffer_size < 21) {
+    if (buffer_size < 22) {
         error = make_error_code(simplify_error::buffer_exhausted);
         return (size_t) -1;
     }
@@ -351,25 +370,22 @@ static size_t PositionToGuid(const EB_Position &pos,
     assert(pos.page >= 0 && pos.offset >= 0);
 
     char *out = buffer;
-    out += UIntToAlpha10(pos.page, out);
+    out += UIntToAlpha10(static_cast<size_t>(pos.page), out);
     *out++ = ':';
-    out += UIntToAlpha10(pos.offset, out);
+    out += UIntToAlpha10(static_cast<size_t>(pos.offset), out);
     *out = '\0';
 
     return out - buffer;
 }
 
-static v8::Handle<v8::Value> Print(const v8::Arguments &args)
+static void Print(const v8::FunctionCallbackInfo<v8::Value>& args)
 {
-    v8::HandleScope handle_scope;
-
-    for (size_t i = 0; i < (size_t)args.Length(); i++) {
+    for (int i = 0; i < args.Length(); i++) {
         v8::String::Utf8Value str(args[i]);
         std::cout << *str << " ";
     }
 
     std::cout << std::endl;
-    return v8::Undefined();
 }
 
 enum class Charset {
@@ -381,22 +397,27 @@ enum class Charset {
 
 class ExternalUcs2String : public v8::String::ExternalStringResource {
 public:
-    ExternalUcs2String(const uint16_t *string, size_t length)
+    ExternalUcs2String(std::shared_ptr<uint16_t> string, size_t length)
       : string_(string),
-        length_(length) {
-    }
+        length_(length) {}
 
-    const uint16_t *data() const {
-        return string_;
-    }
+    const uint16_t *data() const override { return string_.get(); }
+    size_t length() const override { return length_; }
 
-    size_t length() const {
-        return length_;
-    }
+protected:
+    void Dispose() override { delete this; }
 
 private:
-    const uint16_t *string_;
+    std::shared_ptr<uint16_t> string_;
     size_t length_;
+};
+
+class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
+ public:
+  virtual ~ArrayBufferAllocator() = default;
+  virtual void* Allocate(size_t length) { return calloc(1, length); }
+  virtual void* AllocateUninitialized(size_t length) { return malloc(length); }
+  virtual void Free(void* data, size_t) { free(data); }
 };
 
 class EpwingDictionary::Private {
@@ -404,28 +425,41 @@ public:
     typedef EB_Error_Code (*ReaderFn)(EB_Book *, EB_Appendix *, EB_Hookset *,
                                       void *, size_t, char *, ssize_t *);
 
-    Private() : last_sought_text_({-1, -1}) {
+    Private()
+      : last_sought_text_({-1, -1})
+      , current_subbook_(0)
+      , isolate_(nullptr, [](v8::Isolate *p) { p->Dispose(); }) {
         eb_initialize_book(&book_);
         eb_initialize_hookset(&head_hookset_);
         eb_initialize_hookset(&text_hookset_);
 
         EB_Error_Code eb_code;
 
-        // eb_set_hooks should not fail unless there is some invalid hook
-        // code in the hook array.
+        // eb_set_hooks should not fail unless there is a hook with an invalid
+        // id in the hook list.
         eb_code = eb_set_hooks(&head_hookset_, g_head_hooks);
         assert(eb_code == EB_SUCCESS);
         eb_code = eb_set_hooks(&text_hookset_, g_text_hooks);
         assert(eb_code == EB_SUCCESS);
 
-        v8::Locker lock;
-        v8::HandleScope handle_scope;
-        v8::Handle<v8::ObjectTemplate> global = v8::ObjectTemplate::New();
+        v8::Isolate::CreateParams create_params;
+        create_params.array_buffer_allocator = &array_buffer_allocator_;
+        isolate_.reset(v8::Isolate::New(create_params));
 
-        global->Set(v8::String::New("print"),
-                    v8::FunctionTemplate::New(Print));
+        v8::Locker isolate_locker(isolate_.get());
+        v8::Isolate::Scope isolate_scope(isolate_.get());
+        v8::HandleScope handle_scope(isolate_.get());
 
-        js_context_ = v8::Context::New(NULL, global);
+        v8::Local<v8::ObjectTemplate> root_template =
+            v8::ObjectTemplate::New(isolate_.get());
+        root_template->Set(
+            v8::String::NewFromUtf8(isolate_.get(), "print",
+                                    v8::NewStringType::kNormal
+                                   ).ToLocalChecked(),
+            v8::FunctionTemplate::New(isolate_.get(), Print));
+
+        js_context_handle_.Reset(isolate_.get(),
+            v8::Context::New(isolate_.get(), nullptr, root_template));
     }
 
     ~Private() {
@@ -433,9 +467,9 @@ public:
         eb_finalize_hookset(&text_hookset_);
         eb_finalize_book(&book_);
 
-        for (size_t i = 0; i < g_js_function_count; ++i)
-            js_functions_[i].Dispose();
-        js_context_.Dispose();
+        //for (size_t i = 0; i < g_js_function_count; ++i)
+        //    js_functions_[i].Reset();
+        //js_context_handle_.Reset();
     }
 
     /**
@@ -470,79 +504,123 @@ public:
         // Read the user script from script.js.
         std::error_code error;
 
+        script_path_ = script_filename;
+
         // Read file content.
         // We ignore any errors at this point because we still need to populate
         // context with default implementations of the hook functions.
-        // In case of an error we'll just refuse to compile and execute user
-        // script later.
-        auto data = ReadFile(script_filename, error);
 
-        // Populate JavaScript context of the dictionary.
+        std::string custom_script;
+
+        if (script_filename != nullptr && strlen(script_filename) > 0) {
+            nowide::ifstream stream(script_filename);
+
+            if (stream) {
+                try {
+                    std::stringstream ss;
+                    ss << stream.rdbuf();
+                    custom_script = ss.str();
+                } catch (...) {
+                    // FIXME: report failure.
+                }
+            } else {
+                // FIXME: report failure.
+            }
+        }
+
         using namespace v8;
 
-        Locker v8_lock;
-        HandleScope handle_scope;
-        Context::Scope context_scope(js_context_);
-        Handle<Value> result;
+        ENTER_ISOLATE(isolate_.get());
+        ENTER_CONTEXT(GetJsContext());
+        Local<Context> &context = GET_CONTEXT();
 
-        // Populate context with default implementations of the hook functions.
-        // We allow calling default functions from the script.
-        Persistent<Script> &default_script = GetDefaultJsScript();
-        assert(!default_script.IsEmpty());
-        result = default_script->Run();
-        assert(!result.IsEmpty());
+        // Populate JS environment with the default implementation of
+        // callback functions.
+        MaybeLocal<Value> maybe_result;
+        MaybeLocal<Script> environ_script = CompileBuiltinScript(context);
+        if (environ_script.IsEmpty())
+            return make_error_code(simplify_error::js_compilation_error);
+        maybe_result = environ_script.ToLocalChecked()->Run(context);
+        assert(!maybe_result.IsEmpty());
 
-        // Compile and run user script if we have successfully read script
-        // from the script.js file.
-        if (!error) {
-            Handle<String> source = String::New(data.first, data.second);
-            Handle<String> origin = String::New(script_filename);
+        // Compile and run user script to populate current javascript context
+        // with user callbacks.
+        if (custom_script.length() > 0) {
+          MaybeLocal<String> source =
+              String::NewFromUtf8(isolate_.get(), custom_script.c_str(),
+                                  NewStringType::kNormal,
+                                  static_cast<int>(custom_script.length()));
+          MaybeLocal<String> source_filename =
+              String::NewFromUtf8(isolate_.get(), script_filename,
+                                  NewStringType::kNormal);
+          // TODO: More verbose error reports.
+          if (source_filename.IsEmpty())
+              return make_error_code(simplify_error::js_allocation_error);
 
-            // TODO: Add more verbosiness to js error reports.
-            Handle<Script> script = Script::Compile(source, origin);
-            if (script.IsEmpty())
-                error = make_error_code(simplify_error::js_compilation_error);
+          ScriptOrigin origin{source_filename.ToLocalChecked()};
+          MaybeLocal<Script> maybe_user_script =
+              Script::Compile(context, source.ToLocalChecked(), &origin);
+          if (maybe_user_script.IsEmpty())
+              return make_error_code(simplify_error::js_compilation_error);
 
-            result = script->Run();
-            if (result.IsEmpty())
-                error = make_error_code(simplify_error::js_runtime_error);
-
-            for (size_t i = 0; i < g_js_function_count; ++i) {
-                Handle<String> obj_name = String::New(g_js_function_names[i]);
-                Handle<Value> obj = js_context_->Global()->Get(obj_name);
-
-                if (!obj.IsEmpty() && obj->IsFunction())
-                    js_functions_[i] =
-                        Persistent<Function>::New(obj.As<Function>());
-            }
+          maybe_result = maybe_user_script.ToLocalChecked()->Run();
+          if (maybe_result.IsEmpty())
+              return make_error_code(simplify_error::js_runtime_error);
         }
 
-        // Check if we have any hook functions not supplied by the user script.
-        std::string fun_name;
+        // Resolve callbacks and save their handles for ease of access later.
+        std::string fallback_name;
         for (size_t i = 0; i < g_js_function_count; ++i) {
-            // Insert default implementation of the function if it's missing.
-            if (js_functions_[i].IsEmpty()) {
-                fun_name.clear();
-                fun_name.append(1, '_') \
-                        .append(g_js_function_names[i]);
+            MaybeLocal<String> obj_name = String::NewFromUtf8(
+                isolate_.get(),
+                g_js_function_names[i],
+                NewStringType::kNormal
+              );
+            MaybeLocal<Value> obj = context->Global()->Get(
+                context,
+                obj_name.ToLocalChecked()
+              );
 
-                Handle<Value> fun =
-                    js_context_->Global()->Get(String::New(fun_name.c_str()));
-                assert(!fun.IsEmpty() && fun->IsFunction());
 
-                js_functions_[i] =
-                    Persistent<Function>::New(fun.As<Function>());
+            if (!obj.IsEmpty() && obj.ToLocalChecked()->IsFunction()) {
+                // TODO: print an error, if the object is not a function.
+                Local<Function> fn = obj.ToLocalChecked().As<Function>();
+                js_functions_[i].Reset(isolate_.get(), fn);
+            } else {
+                // User script does not implement this callback, fall back
+                // to using its default implementation.
+
+                // Default implementation can be resolved by appending
+                // an underscore to callback name.
+                fallback_name.clear();
+                fallback_name.append(1, '_').append(g_js_function_names[i]);
+
+                MaybeLocal<String> maybe_fallback_name =
+                    String::NewFromUtf8(isolate_.get(), fallback_name.c_str(),
+                                        NewStringType::kNormal);
+                if (maybe_fallback_name.IsEmpty())
+                    return make_error_code(simplify_error::js_allocation_error);
+
+                Local<String> v8_fallback_name =
+                    maybe_fallback_name.ToLocalChecked();
+                MaybeLocal<Value> maybe_fn_handle =
+                    context->Global()->Get(context, v8_fallback_name);
+
+                assert(!maybe_fn_handle.IsEmpty());
+                Local<Value> fn_handle = maybe_fn_handle.ToLocalChecked();
+                assert(fn_handle->IsFunction());
+
+                js_functions_[i].Reset(isolate_.get(),
+                                       fn_handle.As<Function>());
             }
         }
 
-        free(data.first);
-
-        return error;
+        return make_error_code(simplify_error::success);
     }
 
-    bool SelectSubBook(size_t subbook_index, std::error_code &error) {
+    bool SelectSubBook(int subbook_index, std::error_code &error) {
         EB_Subbook_Code subbook_list[EB_MAX_SUBBOOKS];
-        int subbook_count;
+        int subbook_count = 0;
 
         EB_Error_Code eb_code =
             eb_subbook_list(&book_, subbook_list, &subbook_count);
@@ -552,10 +630,11 @@ public:
             return false;
         }
 
-        if (subbook_index < (size_t)subbook_count) {
+        if (subbook_index < subbook_count) {
             eb_code = eb_set_subbook(&book_, subbook_list[subbook_index]);
 
             if (eb_code == EB_SUCCESS) {
+                current_subbook_ = subbook_index;
                 return true;
             } else {
                 error = make_error_code(static_cast<eb_error>(eb_code));
@@ -587,92 +666,134 @@ public:
         }
     }
 
-    size_t ReadUcs2Text(ReaderFn function, EB_Hookset &hookset,
-                        char *buffer, size_t buffer_size,
-                        std::error_code &error) {
+    /**
+     * Reads text from the dictionary using supplied libeb function and
+     * stores the resulting pointer to a UCS2 string in @text. Memory
+     * that's pointed at by the @text should be released using free().
+     *
+     * Uses javascript callbacks to process EPWING tags. Must be invoked from
+     * within a v8 context (Isolate scope, Handle scope, Context scope).
+     *
+     * Returns the number of characters stored in the @text, or (size_t)-1
+     * in case of an error.
+     */
+    malloc_unique_ptr<uint16_t[]> ReadUcs2Text(ReaderFn function,
+                                               EB_Hookset &hookset,
+                                               size_t *result_length,
+                                               std::error_code &error,
+                                               size_t buffer_size_advice = 4096) {
 
-        assert(buffer_size > 0);
+        assert(buffer_size_advice > 0);
+        if (result_length)
+          *result_length = 0;
 
-        v8::HandleScope handle_scope;
-        v8::Context::Scope context_scope(js_context_);
+        size_t buffer_size = buffer_size_advice * sizeof(uint16_t);
+        uint16_t *buffer = reinterpret_cast<uint16_t *>(malloc(buffer_size));
+        size_t growth_exponent = 2;
+        ssize_t text_length = 0;
 
-        ssize_t text_length;
-        EB_Error_Code eb_code = (*function)(&book_,
-                                            NULL,
-                                            &hookset,
-                                            js_functions_,
-                                            buffer_size,
-                                            buffer,
-                                            &text_length);
-        if (eb_code != EB_SUCCESS) {
-            error = make_error_code(static_cast<eb_error>(eb_code));
-            return -1;
+        do {
+            EB_Error_Code eb_code = (*function)(
+                &book_,
+                NULL,
+                &hookset,
+                js_functions_,
+                buffer_size * sizeof(uint16_t),
+                reinterpret_cast<char *>(buffer),
+                &text_length
+            );
+            if (eb_code != EB_SUCCESS) {
+                error = make_error_code(static_cast<eb_error>(eb_code));
+                return malloc_unique_ptr<uint16_t[]>(nullptr, ::free);
+            }
+
+            buffer_size = buffer_size_advice * sizeof(uint16_t);
+            buffer_size *= growth_exponent;
+            growth_exponent += 1;
+
+            buffer = reinterpret_cast<uint16_t *>(realloc(buffer, buffer_size));
+        } while (!eb_is_text_stopped(&book_));
+
+        if (result_length) {
+          assert(text_length >= 0);
+          *result_length = static_cast<size_t>(text_length) / sizeof(uint16_t);
         }
-        if (!eb_is_text_stopped(&book_)) {
-            error = make_error_code(simplify_error::buffer_exhausted);
-            return -1;
-        }
-
-        return text_length;
+        error = make_error_code(simplify_error::success);
+        return malloc_unique_ptr<uint16_t[]>(buffer, ::free);
     }
 
-
-    size_t PipeStringThroughJsFunction(JsFunction function,
-                                       const char *ucs2_bytes,
-                                       size_t ucs2_length,
-                                       char *buffer, size_t buffer_size,
-                                       std::error_code &error) {
-        using namespace v8;
-
-        HandleScope handle_scope;
-        Context::Scope context_scope(js_context_);
-
-        size_t fn_index = static_cast<size_t>(function);
-        Handle<Value> argv[] = {
-            String::NewExternal(new ExternalUcs2String(
-                reinterpret_cast<const uint16_t *>(ucs2_bytes),
-                ucs2_length))
+    Likely<std::unique_ptr<char[]>> RefineDictionaryEntry(
+                                            JsFunction function,
+                                            std::shared_ptr<uint16_t> raw_entry,
+                                            size_t entry_length,
+                                            size_t *result_length) {
+        v8::Isolate *isolate = v8::Isolate::GetCurrent();
+        v8::Local<v8::Value> argv[] = {
+            v8::String::NewExternalTwoByte(
+                isolate,
+                new ExternalUcs2String(raw_entry, entry_length)
+              ).ToLocalChecked()
         };
+        v8::Local<v8::Function> js_callback =
+            js_functions_[static_cast<size_t>(function)].Get(isolate);
+        // FIXME: use empty object, not undefined.
+        v8::MaybeLocal<v8::Value> maybe_result = js_callback->Call(
+            isolate->GetCurrentContext(),
+            v8::Undefined(isolate),
+            sizeof(argv) / sizeof(argv[0]),
+            argv
+          );
 
-        Handle<Value> result = js_functions_[fn_index]->Call(
-                v8::Context::GetEntered()->Global(),
-                sizeof(argv) / sizeof(argv[0]),
-                argv);
+        if (!maybe_result.IsEmpty() &&
+            maybe_result.ToLocalChecked()->IsString()) {
+          v8::Local<v8::String> result =
+              maybe_result.ToLocalChecked().As<v8::String>();
+          int length = result->Utf8Length();
+          int buffer_size = length + 1;
+          char *buffer = new char[buffer_size];
 
-        // Copy the result into the buffer.
-        Handle<String> string;
-        int nchars;
-        int nbytes;
+          result->WriteUtf8(
+              buffer,
+              buffer_size,
+              nullptr,
+              v8::String::REPLACE_INVALID_UTF8
+            );
 
-        // Ensure that the js function has returned a valid string object.
-        // It's very unlikely that the function will return an invalid
-        // object, but if it does, that means that the function contains a
-        // bug.
-        if (!result.IsEmpty() && result->IsString()) {
-            string = result.As<String>();
+          if (result_length)
+            *result_length = static_cast<size_t>(length);
+          return std::unique_ptr<char[]>(buffer);
         } else {
-            error = make_error_code(simplify_error::unexpected_result_type);
-            return -1;
-        }
-
-        nbytes = string->WriteUtf8(buffer, buffer_size, &nchars);
-
-        // Check if we were able to store the whole UTF-8 string into
-        // destination buffer.
-        if (nchars == string->Length()) {
-            return nbytes - 1;
-        } else {
-            error = make_error_code(simplify_error::buffer_exhausted);
-            return -1;
+          if (!maybe_result.IsEmpty())
+            return make_error_code(simplify_error::unexpected_result_type);
+          else
+            return make_error_code(simplify_error::js_allocation_error);
         }
     }
 
-    inline size_t ReadHeading(char *buffer, size_t size, std::error_code &e) {
-        return ReadUcs2Text(&eb_read_heading, head_hookset_, buffer, size, e);
+    malloc_unique_ptr<uint16_t[]> ReadCurrentEntryTitle(size_t *result_length,
+                                                        std::error_code &ec) {
+        return ReadUcs2Text(
+            &eb_read_heading,
+            head_hookset_,
+            result_length,
+            ec,
+            2048
+          );
     }
 
-    inline size_t ReadText(char *buffer, size_t size, std::error_code &e) {
-        return ReadUcs2Text(&eb_read_text, text_hookset_, buffer, size, e);
+    malloc_unique_ptr<uint16_t[]> ReadCurrentEntryText(size_t *result_length,
+                                                       std::error_code &ec) {
+        return ReadUcs2Text(
+            &eb_read_text,
+            text_hookset_,
+            result_length,
+            ec,
+            4096
+          );
+    }
+
+    inline v8::Local<v8::Context> GetJsContext() {
+      return js_context_handle_.Get(isolate_.get());
     }
 
 public:
@@ -680,30 +801,36 @@ public:
     EB_Character_Code charset_;
     EB_Hookset head_hookset_;
     EB_Hookset text_hookset_;
-
     EB_Position last_sought_text_;
 
-    v8::Persistent<v8::Context> js_context_;
-    v8::Persistent<v8::Function> js_functions_[g_js_function_count];
+    int current_subbook_;
+    std::string script_path_;
+
+    ArrayBufferAllocator array_buffer_allocator_;
+    std::unique_ptr<v8::Isolate, std::function<void (v8::Isolate *)>> isolate_;
+    v8::Global<v8::Context> js_context_handle_;
+    v8::Global<v8::Function> js_functions_[g_js_function_count];
 };
 
 class EbSearchResults : public Dictionary::SearchResults {
 public:
     EbSearchResults(EpwingDictionary::Private *p,
                     size_t hit_count,
-                    EB_Hit *hits)
+                    malloc_unique_ptr<EB_Hit[]> hits)
       : d(p),
-        hit_offset_(-1),
+        hit_offset_(static_cast<size_t>(-1)),
         hit_count_(hit_count),
-        hits_(hits)
+        hits_(std::move(hits))
     {
     }
 
-    size_t GetCount() const {
+    virtual ~EbSearchResults() = default;
+
+    size_t GetCount() const override {
         return hit_count_;
     }
 
-    std::error_code SeekNext() {
+    std::error_code SeekNext() override {
         size_t offset = hit_offset_ + 1;
         std::error_code e;
 
@@ -714,14 +841,11 @@ public:
 
         hit_offset_ = offset;
 
-        // For some reason, some dictionaries return two entries
-        // pointing to the same article. It wont be a problem
-        // if there were only a few duplicates, but in reality,
-        // search results tend to be oversaturated by duplicates.
-        //
-        // It is also worth pointing out that checking each entry
-        // against hash table would be more bullet-proof method,
-        // but I haven't yet encountered any non-adjacent duplicates.
+        // For some reason, searching some dictionaries may return
+        // two adjacent results pointing at the same article.
+        // It wouldn't be a problem if there were only a few duplicates,
+        // but, unfortunately, many searches tend to return more than
+        // a few duplicates and it quickly becomes an eyesore.
         if (offset > 0) {
             EB_Position &prevText = hits_[offset - 1].text;
             EB_Position &thisText = hits_[offset].text;
@@ -731,79 +855,75 @@ public:
                 return SeekNext();
         }
 
-        heading_length_ = d->ReadHeading(heading_, sizeof(heading_), e) / 2;
+        ENTER_ISOLATE(d->isolate_.get());
+        ENTER_CONTEXT(d->GetJsContext());
 
-        // Skip this search result if heading was too large to fit into
-        // temporary buffer.
-        if (unlikely(e == simplify_error::buffer_exhausted))
-            return SeekNext();
+        malloc_unique_ptr<uint16_t[]> result =
+            d->ReadCurrentEntryTitle(&current_entry_length_, e);
+        current_entry_text_.reset(result.release(), result.get_deleter());
 
         return e;
     }
 
-    Likely<size_t> FetchHeading(char *buffer, size_t buffer_size) {
-        return FetchHelper(JsFunction::ProcessHeading, buffer, buffer_size);
+    Likely<std::unique_ptr<char[]>> FetchHeading(size_t *result_size) override {
+        return FetchHelper(JsFunction::ProcessHeading, result_size);
     }
 
-    Likely<size_t> FetchTags(char *buffer, size_t buffer_size) {
-        return FetchHelper(JsFunction::ProcessTags, buffer, buffer_size);
+    Likely<std::unique_ptr<char[]>> FetchTags(size_t *result_size) override {
+        return FetchHelper(JsFunction::ProcessTags, result_size);
     }
 
-    Likely<size_t> FetchGuid(char *buffer, size_t buffer_size) {
+    Likely<size_t> FetchGuid(char *buffer, size_t buffer_size) override {
         std::error_code error;
         size_t length = PositionToGuid(hits_[hit_offset_].text,
                                        buffer, buffer_size, error);
-        if (length != (size_t)-1)
+        if (length != (size_t) -1)
             return length;
         else
             return error;
     }
 
-    inline void *operator new(size_t size, void *mem) throw() {
-        return mem;
-    }
-
-    inline void operator delete(void *mem) {
-        free(mem);
-    }
-
 private:
-    inline Likely<size_t> FetchHelper(JsFunction function,
-                                      char *buffer, size_t buffer_size) {
-        std::error_code error;
-        size_t bytes_read = d->PipeStringThroughJsFunction(function,
-                                                           heading_,
-                                                           heading_length_,
-                                                           buffer, buffer_size,
-                                                           error);
-        if (bytes_read != (size_t)-1)
-            return bytes_read;
-        else
-            return error;
+    Likely<std::unique_ptr<char[]>> FetchHelper(JsFunction function,
+                                                size_t *result_size) {
+        ENTER_ISOLATE(d->isolate_.get());
+        ENTER_CONTEXT(d->GetJsContext());
+        return d->RefineDictionaryEntry(
+            function,
+            current_entry_text_,
+            current_entry_length_,
+            result_size
+          );
     }
 
 private:
     EpwingDictionary::Private *d;
     size_t hit_offset_;
     size_t hit_count_;
-    EB_Hit *hits_;
-    v8::Locker v8_lock_;
-    size_t heading_length_;
-    char heading_[4096];
+    malloc_unique_ptr<EB_Hit[]> hits_;
+    size_t current_entry_length_;
+    std::shared_ptr<uint16_t> current_entry_text_;
+    v8::Global<v8::Object> current_this_object_;
 };
 
-EpwingDictionary::EpwingDictionary(Config *conf) : Dictionary(conf)
+EpwingDictionary::EpwingDictionary(const char *name) : Dictionary(name)
 {
-    // Instantiate Locker before doing anything JS related to let v8 know
-    // that we might be using threads.
-    v8::Locker lock;
+    d = new Private();
+}
 
+EpwingDictionary::EpwingDictionary(std::string name) : Dictionary(std::move(name))
+{
     d = new Private();
 }
 
 EpwingDictionary::~EpwingDictionary()
 {
     delete d;
+}
+
+DictionaryType EpwingDictionary::GetType() const
+{
+    return DictionaryType::Epwing;
 }
 
 Likely<std::vector<std::string>> EpwingDictionary::ListSubBooks() const
@@ -830,7 +950,7 @@ Likely<std::vector<std::string>> EpwingDictionary::ListSubBooks() const
             continue;
         }
 
-        // FIXME: I'm not sure what encoding subbook titles use.
+        // FIXME: I'm not sure which encoding do subbook titles use.
         // Assuming EUC-JP.
         std::error_code error;
         size_t length = ConvertEucJpToUtf8(buffer, strlen(buffer),
@@ -845,13 +965,12 @@ Likely<std::vector<std::string>> EpwingDictionary::ListSubBooks() const
     return names_list;
 }
 
-std::error_code EpwingDictionary::SelectSubBook(size_t subbook_index) {
+std::error_code EpwingDictionary::SelectSubBook(int subbook_index) {
     std::error_code error;
 
     if (d->SelectSubBook(subbook_index, error)) {
-        // Save the preference so we can restore last selected
-        // subbook the next time the dictionary is created.
-        (*conf_)["Epwing"].WriteInt32("subbook", subbook_index);
+        // Currently selected sub-book is part of permanent state, so save it.
+        this->SaveState();
     }
 
     return error;
@@ -868,17 +987,27 @@ Likely<Dictionary::SearchResults *> EpwingDictionary::Search(const char *expr,
 
     // Re-encode search string to the string with character encoding
     // required by the dictionary.
-    char conv_expr[expr_length * 3 + 1];
+    std::unique_ptr<char[]> conv_expr;
     std::error_code last_error;
 
+    // FIXME: what?
     if (d->charset_ != EB_CHARCODE_ISO8859_1) {
-        ConvertUtf8ToEucJp(expr, expr_length + 1,
-                           conv_expr, sizeof(conv_expr),
-                           last_error);
+        size_t buffer_size = expr_length * 3 + 1;
+        conv_expr.reset(new char[buffer_size]);
+
+        ConvertUtf8ToEucJp(
+            expr, expr_length + 1,
+            conv_expr.get(), buffer_size,
+            last_error
+          );
     } else {
-        ConvertUtf8ToIso8859_1(expr, expr_length + 1,
-                               conv_expr, sizeof(conv_expr),
-                               last_error);
+        size_t buffer_size = expr_length + 1;
+        conv_expr.reset(new char[buffer_size]);
+        ConvertUtf8ToIso8859_1(
+            expr, expr_length + 1,
+            conv_expr.get(), buffer_size,
+            last_error
+          );
     }
 
     if (last_error) return last_error;
@@ -910,189 +1039,153 @@ Likely<Dictionary::SearchResults *> EpwingDictionary::Search(const char *expr,
         return make_error_code(simplify_error::cant_search);
 
     // Perform search using selected search method.
-    EB_Error_Code eb_code = (*search_fun)(&d->book_, conv_expr);
+    EB_Error_Code eb_code = (*search_fun)(&d->book_, conv_expr.get());
     if (eb_code != EB_SUCCESS)
         return make_error_code(static_cast<eb_error>(eb_code));
 
     return GetResults(limit);
 }
 
-Likely<size_t> EpwingDictionary::ReadText(const char *guid, char **ptr)
+Likely<std::unique_ptr<char[]>> EpwingDictionary::ReadText(const char *guid,
+                                                           size_t *text_length)
 {
     EB_Position position;
-    std::error_code last_error;
+    std::error_code ec;
 
-    if (!GuidToPosition(guid, position, last_error) ||
-        !d->SeekText(position, last_error))
-        return last_error;
+    if (!GuidToPosition(guid, position, ec) || !d->SeekText(position, ec))
+        return ec;
 
-    // Acquire big v8 lock (a requirement imposed by ReadText and
-    // PipeStringThroughJsFunction methods).
-    v8::Locker v8_lock;
+    ENTER_ISOLATE(d->isolate_.get());
+    ENTER_CONTEXT(d->GetJsContext());
 
-    // Read text from the dictionary. There is no way to determine length
-    // of article's text in advance, we have to do some guesswork.
-    size_t ucs2_buffer_size = 4096;
-    while (true) {
-        char ucs2_text[ucs2_buffer_size];
-        size_t bytes_read =
-            d->ReadText(ucs2_text, ucs2_buffer_size, last_error);
+    size_t entry_length = 0;
+    malloc_unique_ptr<uint16_t[]> entry_text =
+        d->ReadCurrentEntryText(&entry_length, ec);
 
-        if (bytes_read != (size_t) -1) {
-            // Allocate a buffer that's large enough to store store UTF-8 text
-            // and pipe article's UCS-2 text through the ProcessText() script
-            // function.
-            size_t buffer_size = bytes_read * 3;
-            *ptr = new char[buffer_size];
-            bytes_read = d->PipeStringThroughJsFunction(JsFunction::ProcessText,
-                                                        ucs2_text,
-                                                        bytes_read / 2,
-                                                        *ptr, buffer_size,
-                                                        last_error);
-            if (bytes_read != (size_t)-1) {
-                return bytes_read;
-            } else {
-                delete[] *ptr;
-                return last_error;
-            }
-        } else {
-            // Do another round if the buffer was not large enough.
-            if (last_error == simplify_error::buffer_exhausted) {
-                ucs2_buffer_size += 2048;
-                continue;
-            } else {
-                return last_error;
-            }
-        }
+    if (entry_text) {
+      std::shared_ptr<uint16_t> shared_text{entry_text.release(),
+                                            entry_text.get_deleter()};
+      return d->RefineDictionaryEntry(
+          JsFunction::ProcessText,
+          shared_text,
+          entry_length,
+          text_length
+        );
+    } else {
+      return ec;
     }
 }
 
-Likely<size_t> EpwingDictionary::ReadText(const char *guid,
-                                          char *buffer, size_t buffer_size)
+Likely<Dictionary::SearchResults *> EpwingDictionary::GetResults(size_t limit)
 {
-    EB_Position position;
-    std::error_code last_error;
-
-    if (!GuidToPosition(guid, position, last_error) ||
-        !d->SeekText(position, last_error)) {
-        return last_error;
-    }
-
-    // Acquire big v8 lock (a requirement for ReadText() and
-    // PipeStringThroughJsFunction() methods).
-    v8::Locker v8_lock;
-
-    // Read article's text to a temporary buffer and then process it using
-    // the ProcessText() script function.
-    char ucs2_text[buffer_size * 2];
-    size_t bytes_read = d->ReadText(ucs2_text, buffer_size, last_error);
-    if (bytes_read == (size_t)-1)
-        return last_error;
-
-    bytes_read = d->PipeStringThroughJsFunction(JsFunction::ProcessText,
-                                                ucs2_text, bytes_read / 2,
-                                                buffer, buffer_size,
-                                                last_error);
-    if (bytes_read != (size_t)-1)
-        return bytes_read;
-    else
-        return last_error;
-}
-
-Likely<Dictionary::SearchResults *> EpwingDictionary::GetResults(
-                                                             size_t max_count)
-{
+    EB_Hit *hits = nullptr;
     EB_Error_Code eb_code;
-    size_t total_count = 0;
     int increase_step = 256;
+    int result_count = 0;
+    int adjusted_limit;
 
-    struct SearchResultsMemoryLayout {
-        uint8_t results[sizeof(EbSearchResults)];
-        EB_Hit hits[];
-    } *sr = NULL;
+    if (limit != 0 || limit <= std::numeric_limits<int>::max())
+      adjusted_limit = static_cast<int>(limit);
+    else
+      adjusted_limit = std::numeric_limits<int>::max();
 
+    // Retrieve search results from libeb by sliding through the hit_list.
+    //
+    // Since there isn't a way to know number of results in advance, we have to
+    // grow our result buffer incrementally.
     while (true) {
-        int step = std::min(max_count - total_count, (size_t)increase_step);
-
-        sr = static_cast<SearchResultsMemoryLayout *>(
-                realloc(sr, sizeof(SearchResultsMemoryLayout) + \
-                            total_count * sizeof(EB_Hit)      + \
-                            step * sizeof(EB_Hit)));
-
         int hit_count;
-        eb_code = eb_hit_list(&d->book_,
-                              step,
-                              sr->hits + total_count,
-                              &hit_count);
+        int step = std::min(adjusted_limit - result_count, increase_step);
+        size_t alloc_size = (result_count + step) * sizeof(EB_Hit);
+
+        hits = reinterpret_cast<EB_Hit *>(realloc(hits, alloc_size));
+        eb_code = eb_hit_list(&d->book_, step, hits + result_count, &hit_count);
 
         if (eb_code == EB_SUCCESS) {
-            total_count += hit_count;
+            result_count += hit_count;
 
-            // Be done, if the number of returned hits is less than the number
-            // of items we've allocated or we've reached maximum number of
-            // results.
-            if (hit_count < step || total_count >= max_count)
+            // Any number of search results that is lower than *allocation step*
+            // indicates that we are done.
+            if (hit_count < step || result_count >= adjusted_limit)
                 break;
         } else {
             return make_error_code(static_cast<eb_error>(eb_code));
         }
     }
 
-    SearchResults *results =
-        new(sr->results) EbSearchResults(d, total_count, sr->hits);
-    return results;
+    return new EbSearchResults(d,
+                               static_cast<size_t>(result_count),
+                               malloc_unique_ptr<EB_Hit[]>(hits, ::free));
 }
 
-Likely<EpwingDictionary *> EpwingDictionary::New(const char *path,
-                                                 Config *conf)
+Likely<EpwingDictionary *> EpwingDictionary::New(const char *name,
+                                                 const char *path,
+                                                 const char *script_path)
 {
-    // Write the path of the dictionary in advance so the Initialize() method
-    // will be able to pick it up.
-    (*conf)["Epwing"].WriteString("path", path);
+    EpwingDictionary *dict = new EpwingDictionary(name);
+    std::error_code error = dict->Initialize(path, script_path, nullptr);
 
-    EpwingDictionary *dict = new EpwingDictionary(conf);
-    std::error_code error = dict->Initialize();
-
-    if (!error)
+    if (!error) {
         return dict;
-    else
+    } else {
+        delete dict;
         return error;
+    }
 }
 
-Likely<EpwingDictionary *> EpwingDictionary::New(Config *conf)
+Likely<EpwingDictionary *> EpwingDictionary::NewWithState(const char *name,
+                                                          const char *path,
+                                                          const nlohmann::json &state)
 {
-    EpwingDictionary *dict = new EpwingDictionary(conf);
-    std::error_code error = dict->Initialize();
+    EpwingDictionary *dict = new EpwingDictionary(name);
+    std::error_code error = dict->Initialize(path, nullptr, &state);
 
-    if (!error)
+    if (!error) {
         return dict;
-    else
+    } else {
+        delete dict;
         return error;
+    }
 }
 
-std::error_code EpwingDictionary::Initialize()
+std::error_code EpwingDictionary::Initialize(const char *dict_path,
+                                             const char *script_path,
+                                             const nlohmann::json *state)
 {
-    const char *path;
+    using json = nlohmann::json;
     std::error_code last_error;
 
     if (!InitializeLibEb(last_error))
         return last_error;
 
-    Config::ConfigSection &epwing = conf_->GetSection("Epwing");
-    bool success = epwing.ReadString("path", &path);
-
-    if (!success)
-        return make_error_code(simplify_error::bad_configuration);
-
-    if (!d->Bind(path, last_error))
+    if (!d->Bind(dict_path, last_error))
         return last_error;
 
-    // TODO: Notify if we've failed to select subbook.
-    d->SelectSubBook(epwing.ReadInt32("subbook", 0), last_error);
+    if (state != nullptr) {
+        if (auto v = (*state)["subbook"]; v.is_number()) {
+            auto index = v.get<json::number_integer_t>();
 
-    // TODO: Notify if we've failed to load user scripts.
-    std::string custom_js = conf_->GetEnclosingDirectory() + "/custom.js";
-    d->PopulateJsContext(custom_js.c_str());
+            // Use our private implementation's SelectSubBook() method to
+            // bypass saving state (which we are restoring currently).
+            if (!d->SelectSubBook(index, last_error))
+                return last_error;
+        }
+
+        // Use path to custom script from state, but only if it wasn't
+        // explicitly provided.
+        if (auto v = (*state)["script"]; v.is_string() && !script_path) {
+            auto path = v.get_ref<const json::string_t &>();
+            last_error = d->PopulateJsContext(path.c_str());
+            if (last_error)
+                return last_error;
+        }
+    }
+
+    if (script_path != nullptr) {
+        last_error = d->PopulateJsContext(script_path);
+        if (last_error)
+            return last_error;
+    }
 
     return last_error;
 }
@@ -1100,28 +1193,42 @@ std::error_code EpwingDictionary::Initialize()
 static EB_Error_Code WriteJs(EB_Book *book, void *hook_arg, JsFunction function,
                              int argc, v8::Handle<v8::Value> *argv)
 {
-    using namespace v8;
+    v8::Isolate *isolate = v8::Isolate::GetCurrent();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
 
-    size_t fn_index = static_cast<size_t>(function);
-    Persistent<Function> &fn =
-        reinterpret_cast<Persistent<Function> *>(hook_arg)[fn_index];
+    assert(hook_arg != nullptr);
+    assert(isolate != nullptr);
 
-    assert(!fn.IsEmpty() && fn->IsFunction());
+    size_t callback_index = static_cast<size_t>(function);
+    auto callback_array = reinterpret_cast<v8::Global<v8::Function>*>(hook_arg);
+    v8::Local<v8::Function> callback_fn =
+        callback_array[callback_index].Get(isolate);
 
-    Handle<Value> result =
-        fn->Call(Context::GetEntered()->Global(), argc, argv);
+    assert(!callback_fn.IsEmpty() && callback_fn->IsFunction());
 
-    if (!result.IsEmpty() && result->IsString()) {
-        Handle<String> string = result.As<String>();
-        uint16_t chars[string->Length() + 1];
-        size_t copied = string->Write(chars);
+    // FIXME: Pass regular object, not Undefined.
+    v8::MaybeLocal<v8::Value> maybe_result =
+        callback_fn->Call(context, v8::Undefined(isolate), argc, argv);
 
-        // Even though the v8 documentation states that the value returned
-        // from the String::Write() method is the number of bytes written,
-        // in reality though, it's the number of characters written.
-        return eb_write_text(book, reinterpret_cast<char *>(chars),
-                             copied * sizeof(uint16_t));
+    if (!maybe_result.IsEmpty() && maybe_result.ToLocalChecked()->IsString()) {
+        v8::Local<v8::String> string =
+            maybe_result.ToLocalChecked().As<v8::String>();
+
+        // Use stack for storing short strings.
+        if (string->Length() <= 4096) {
+            uint16_t buffer[4096];
+            size_t bytes_written = (size_t) string->Write(buffer);
+            return eb_write_text(book, reinterpret_cast<char *>(buffer),
+                                 bytes_written * sizeof(uint16_t));
+        } else {
+            size_t length = static_cast<size_t>(string->Length());
+            std::unique_ptr<uint16_t[]> buffer(new uint16_t[length + 1]);
+            size_t bytes_written = (size_t) string->Write(buffer.get());
+            return eb_write_text(book, reinterpret_cast<char *>(buffer.get()),
+                                 bytes_written * sizeof(uint16_t));
+        }
     } else {
+        // TODO: handle errors.
         return EB_SUCCESS;
     }
 }
@@ -1133,10 +1240,9 @@ inline static EB_Error_Code WriteJs(EB_Book *book, void *hook_arg,
 }
 
 static EB_Error_Code HandleIso8859_1(EB_Book *book, EB_Appendix *, void *arg,
-                                     EB_Hook_Code,int argc,
+                                     EB_Hook_Code, int argc,
                                      const unsigned int *argv)
 {
-    // FIXME: Broken on big-endian machines.
     char ucs2[2] = { (char)argv[0], 0 };
     return eb_write_text(book, ucs2, sizeof(ucs2));
 }
@@ -1145,7 +1251,6 @@ static EB_Error_Code HandleJisX0208(EB_Book *book, EB_Appendix *, void *arg,
                                     EB_Hook_Code, int argc,
                                     const unsigned int *argv)
 {
-    // FIXME: Broken on big-endian machines.
     unsigned int c = argv[0];
     size_t size = ((c & 0xff000000) != 0) + ((c & 0x00ff0000) != 0) + \
                   ((c & 0x0000ff00) != 0) + ((c & 0x000000ff) != 0);
@@ -1178,37 +1283,37 @@ static EB_Error_Code HandleJisX0208(EB_Book *book, EB_Appendix *, void *arg,
 }
 
 static EB_Error_Code HandleGb2312(EB_Book *book, EB_Appendix *, void *arg,
-                                  EB_Hook_Code, int argc,
-                                  const unsigned int *argv)
+                                  EB_Hook_Code, int /*argc*/,
+                                  const unsigned int * /*argv*/)
 {
     printf("HandleGb2312() not implemented.\n");
     return EB_SUCCESS;
 }
 
 static EB_Error_Code HandleBeginSub(EB_Book *book, EB_Appendix *, void *arg,
-                                    EB_Hook_Code, int argc,
-                                    const unsigned int *argv)
+                                    EB_Hook_Code, int /*argc*/,
+                                    const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::BeginSubscript);
 }
 
 static EB_Error_Code HandleEndSub(EB_Book *book, EB_Appendix *, void *arg,
-                                  EB_Hook_Code, int argc,
-                                  const unsigned int *argv)
+                                  EB_Hook_Code, int /*argc*/,
+                                  const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::EndSubscript);
 }
 
 static EB_Error_Code HandleBeginSup(EB_Book *book, EB_Appendix *, void *arg,
-                                    EB_Hook_Code, int argc,
-                                    const unsigned int *argv)
+                                    EB_Hook_Code, int /*argc*/,
+                                    const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::BeginSuperscript);
 }
 
 static EB_Error_Code HandleEndSup(EB_Book *book, EB_Appendix *, void *arg,
-                                  EB_Hook_Code, int argc,
-                                  const unsigned int *argv)
+                                  EB_Hook_Code, int /*argc*/,
+                                  const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::EndSuperscript);
 }
@@ -1217,49 +1322,51 @@ static EB_Error_Code HandleIndent(EB_Book *book, EB_Appendix *, void *arg,
                                   EB_Hook_Code, int argc,
                                   const unsigned int *argv)
 {
-    v8::Handle<v8::Value> v8argv[] = { v8::Uint32::New(argv[1]) };
+    v8::Local<v8::Value> v8argv[] = {
+      v8::Uint32::NewFromUnsigned(v8::Isolate::GetCurrent(), argv[1])
+    };
     return WriteJs(book, arg, JsFunction::Indent,
                    sizeof(v8argv) / sizeof(v8argv[0]), v8argv);
 }
 
 static EB_Error_Code HandleNewline(EB_Book *book, EB_Appendix *, void *arg,
-                                   EB_Hook_Code, int argc,
-                                   const unsigned int *argv)
+                                   EB_Hook_Code, int /*argc*/,
+                                   const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::Newline);
 }
 
 static EB_Error_Code HandleBeginNoBr(EB_Book *book, EB_Appendix *, void *arg,
-                                     EB_Hook_Code, int argc,
-                                     const unsigned int *argv)
+                                     EB_Hook_Code, int /*argc*/,
+                                     const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::BeginNoBreak);
 }
 
 static EB_Error_Code HandleEndNoBr(EB_Book *book, EB_Appendix *, void *arg,
-                                   EB_Hook_Code, int argc,
-                                   const unsigned int *argv)
+                                   EB_Hook_Code, int /*argc*/,
+                                   const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::EndNoBreak);
 }
 
 static EB_Error_Code HandleBeginEm(EB_Book *book, EB_Appendix *, void *arg,
-                                   EB_Hook_Code, int argc,
-                                   const unsigned int *argv)
+                                   EB_Hook_Code, int /*argc*/,
+                                   const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::BeginEmphasis);
 }
 
 static EB_Error_Code HandleEndEm(EB_Book *book, EB_Appendix *, void *arg,
-                                 EB_Hook_Code, int argc,
-                                 const unsigned int *argv)
+                                 EB_Hook_Code, int /*argc*/,
+                                 const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::EndEmphasis);
 }
 
 static EB_Error_Code HandleBeginReference(EB_Book *book, EB_Appendix *,
-                                          void *arg, EB_Hook_Code, int argc,
-                                          const unsigned int *argv)
+                                          void *arg, EB_Hook_Code, int /*argc*/,
+                                          const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::BeginReference);
 }
@@ -1268,9 +1375,10 @@ static EB_Error_Code HandleEndReference(EB_Book *book, EB_Appendix *,
                                         void *arg, EB_Hook_Code, int argc,
                                         const unsigned int *argv)
 {
-    v8::Handle<v8::Value> v8argv[] = {
-        v8::Int32::New(argv[1]),
-        v8::Int32::New(argv[2])
+    v8::Isolate *isolate = v8::Isolate::GetCurrent();
+    v8::Local<v8::Value> v8argv[] = {
+        v8::Uint32::NewFromUnsigned(isolate, argv[1]),
+        v8::Uint32::NewFromUnsigned(isolate, argv[2])
     };
 
     return WriteJs(book, arg, JsFunction::EndReference,
@@ -1278,29 +1386,29 @@ static EB_Error_Code HandleEndReference(EB_Book *book, EB_Appendix *,
 }
 
 static EB_Error_Code HandleBeginKeyword(EB_Book *book, EB_Appendix *,
-                                        void *arg, EB_Hook_Code, int argc,
-                                        const unsigned int *argv)
+                                        void *arg, EB_Hook_Code, int /*argc*/,
+                                        const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::BeginKeyword);
 }
 
 static EB_Error_Code HandleEndKeyword(EB_Book *book, EB_Appendix *, void *arg,
-                                      EB_Hook_Code, int argc,
-                                      const unsigned int *argv)
+                                      EB_Hook_Code, int /*argc*/,
+                                      const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::EndKeyword);
 }
 
 static EB_Error_Code HandleBeginDecoration(EB_Book *book, EB_Appendix *,
-                                           void *arg, EB_Hook_Code, int argc,
-                                           const unsigned int *argv)
+                                           void *arg, EB_Hook_Code, int /*argc*/,
+                                           const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::BeginDecoration);
 }
 
 static EB_Error_Code HandleEndDecoration(EB_Book *book, EB_Appendix *,
-                                         void *arg, EB_Hook_Code, int argc,
-                                         const unsigned int *argv)
+                                         void *arg, EB_Hook_Code, int /*argc*/,
+                                         const unsigned int * /*argv*/)
 {
     return WriteJs(book, arg, JsFunction::EndDecoration);
 }
@@ -1309,8 +1417,8 @@ static EB_Error_Code HandleInsertHGaiji(EB_Book *book, EB_Appendix *,
                                         void *arg, EB_Hook_Code, int argc,
                                         const unsigned int *argv)
 {
-    v8::Handle<v8::Value> v8argv[] = {
-        v8::Uint32::New(argv[0])
+    v8::Local<v8::Value> v8argv[] = {
+        v8::Uint32::NewFromUnsigned(v8::Isolate::GetCurrent(), argv[0])
     };
 
     return WriteJs(book, arg, JsFunction::InsertHeadingGaiji,
@@ -1321,12 +1429,25 @@ static EB_Error_Code HandleInsertTGaiji(EB_Book *book, EB_Appendix *,
                                         void *arg, EB_Hook_Code, int argc,
                                         const unsigned int *argv)
 {
-    v8::Handle<v8::Value> v8argv[] = {
-        v8::Uint32::New(argv[0])
+    v8::Local<v8::Value> v8argv[] = {
+        v8::Uint32::NewFromUnsigned(v8::Isolate::GetCurrent(), argv[0])
     };
 
     return WriteJs(book, arg, JsFunction::InsertTextGaiji,
                    sizeof(v8argv) / sizeof(v8argv[0]), v8argv);
+}
+
+void to_json(nlohmann::json &dst, const EpwingDictionary *dict)
+{
+    dst = nlohmann::json{
+        {"subbook", dict->d->current_subbook_},
+        {"script", dict->d->script_path_}
+    };
+}
+
+void to_json(nlohmann::json &dst, const EpwingDictionary &dict)
+{
+    to_json(dst, &dict);
 }
 
 }  // namespace simplify

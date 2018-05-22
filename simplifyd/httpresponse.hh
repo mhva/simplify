@@ -22,6 +22,7 @@
 #define SIMPLIFYD_HTTPRESPONSE_HH_
 
 #include <vector>
+#include <string>
 
 namespace simplifyd {
 

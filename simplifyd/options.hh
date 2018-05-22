@@ -21,6 +21,8 @@
 #ifndef SIMPLIFYD_OPTIONS_HH_
 #define SIMPLIFYD_OPTIONS_HH_
 
+#include <string>
+
 namespace simplifyd {
 
 class Options
@@ -30,19 +32,21 @@ public:
     ~Options();
 
     void SetPort(int port);
-    void SetRepositoryDir(const char *path);
+    void SetRepositoryConfigPath(const char *path);
     void SetDaemonize(bool daemonize);
     void SetHtmlDir(const char *path);
 
     int GetPort() const;
-    const char *GetRepositoryDir() const;
+    const char *GetConfigDir() const;
     const char *GetHtmlDir() const;
+    const char *GetRepositoryConfigPath() const;
     bool GetDaemonize() const;
 
 private:
     int port_;
-    char *repository_dir_;
-    char *html_dir_;
+    std::string config_dir_;
+    std::string repository_config_;
+    std::string html_dir_;
     bool daemonize_;
 };
 

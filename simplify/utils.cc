@@ -24,65 +24,13 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <cstdio>
 #include <iostream>
 
 #include "utils.hh"
 
 namespace simplify {
-
-std::pair<char *, size_t> ReadFile(const char *filename, std::error_code &error)
-{
-    error.clear();
-
-    FILE *file = std::fopen(filename, "rb");
-    long fsize;
-
-    if (file == NULL || std::fseek(file, 0, SEEK_END) == -1 ||
-        (fsize = std::ftell(file)) == -1) {
-        error = make_error_code(static_cast<std::errc>(errno));
-        return std::make_pair((char *)NULL, 0);
-    }
-
-    rewind(file);
-
-#ifdef HAVE_POSIX_FADVISE
-    posix_fadvise(fileno(file), 0, fsize, POSIX_FADV_SEQUENTIAL);
-#endif
-
-    char *buffer = NULL;
-    size_t buffer_offset = 0;
-    size_t buffer_size = fsize;
-    size_t length = 0;
-
-    // Read the whole file into buffer.
-    while (true) {
-        buffer = static_cast<char *>(realloc(buffer, buffer_size));
-
-        size_t got =
-            fread(buffer + buffer_offset, 1, buffer_size - buffer_offset, file);
-
-        if (std::ferror(file) != 0) {
-            std::fclose(file);
-
-            free(buffer);
-            error = make_error_code(static_cast<std::errc>(errno));
-            return std::make_pair((char *)NULL, 0);
-        }
-
-        if (feof(file) != 0) {
-            length = buffer_offset + got;
-            break;
-        } else {
-            // Continue reading file with larger buffer.
-            buffer_offset = buffer_size;
-            buffer_size *= 1.5f;
-        }
-    }
-
-    std::fclose(file);
-    return std::make_pair(buffer, length);
-}
 
 size_t UIntToAlpha10(size_t v, char *buffer)
 {
@@ -126,6 +74,13 @@ size_t EscapeDoubleQuotes(const char *input,
         return out - buffer;
     else
         return -1;
+}
+
+bool StreqCaseFold(const std::string &s1, const std::string &s2)
+{
+    return std::equal(s1.begin(), s1.end(), s2.begin(), [](auto x, auto y) {
+        return tolower(x) == tolower(y);
+    });
 }
 
 }  // namespace simplify

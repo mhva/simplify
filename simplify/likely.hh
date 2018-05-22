@@ -35,6 +35,14 @@ public:
     inline Likely(const T &value) : value_(value) {}
     inline Likely(const std::error_code &error) : error_(error) {}
 
+    inline bool is_error() const {
+      return (bool) error_;
+    }
+
+    inline T &value_checked() {
+      return value_;
+    }
+
     inline std::error_code &error_code() {
         return error_;
     }
@@ -51,7 +59,7 @@ public:
     }
 
     explicit inline operator bool() {
-        return !error_;
+        return !is_error();
     }
 
 private:
@@ -66,12 +74,20 @@ public:
     inline Likely(T *value) : value_(value) {}
     inline Likely(const std::error_code &error) : error_(error) {}
 
+    inline bool is_error() const {
+      return (bool) error_;
+    }
+
+    inline T *value_checked() {
+      return value_;
+    }
+
     inline std::error_code &error_code() {
         return error_;
     }
 
     inline operator bool() {
-        return !error_;
+        return !is_error();
     }
 
     inline T *operator *() {

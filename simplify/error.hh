@@ -25,7 +25,7 @@
 
 namespace simplify {
 
-enum class simplify_error {
+enum simplify_error {
     success                = 0,
     invalid_syntax         = 1,
     bad_configuration      = 2,
@@ -40,12 +40,14 @@ enum class simplify_error {
     bad_guid               = 11,
     js_compilation_error   = 12,
     js_runtime_error       = 13,
-    already_exists         = 14,
-    empty_string           = 15,
-    empty_likely           = 16,
-    buffer_exhausted       = 17,
-    unexpected_result_type = 18,
-    no_more_results        = 19
+    js_allocation_error    = 14,
+    already_exists         = 15,
+    empty_string           = 16,
+    empty_likely           = 17,
+    buffer_exhausted       = 18,
+    unexpected_result_type = 19,
+    no_more_results        = 20,
+    unsupported_dictionary = 21,
 };
 
 /*

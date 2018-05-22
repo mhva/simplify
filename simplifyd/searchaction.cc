@@ -41,6 +41,7 @@ void SearchAction::Handle(simplify::Repository &repository,
     const char *expr = query.GetParamValue("q");
 
     response.AddHeader("Content-Type", "application/json; charset=utf-8");
+    response.AddHeader("Cache-Control", "no-cache");
 
     if (expr == NULL) {
         body.append("{\"error\":\"Empty search expression\"}");
@@ -54,8 +55,7 @@ void SearchAction::Handle(simplify::Repository &repository,
     //  the given ID.
     // If the dictionary ID is missing we search all dictionaries.
     if (dict_id != NULL) {
-        simplify::Dictionary *dict =
-            repository.GetDictionaryByIndex(strtol(dict_id, NULL, 10));
+        auto dict = repository.GetDictionary(strtol(dict_id, NULL, 10));
 
         if (dict != NULL) {
             body.append("\"").append(dict->GetName()).append("\":");
@@ -69,10 +69,6 @@ void SearchAction::Handle(simplify::Repository &repository,
     }
 
     body.append("}");
-
-    // FIXME: Bad 'Expires' header.
-    response.AddHeader("Expires", "Tue, 1 Sep 2015 00:00:00 GMT");
-    response.AddHeader("Cache-Control", "max-age=3600,public");
 }
 
 void SearchAction::SearchDict(simplify::Repository &repository,
@@ -123,6 +119,7 @@ void SearchAction::SearchDict(simplify::Repository &repository,
         // result's text in case anything goes wrong to avoid producing
         // malformed JSON.
         size_t result_start = body.length();
+        size_t length = 0;
 
         simplify::Likely<size_t> likely_length =
             results->FetchGuid(text_buffer, sizeof(text_buffer));
@@ -139,13 +136,13 @@ void SearchAction::SearchDict(simplify::Repository &repository,
             continue;
         }
 
-        likely_length = results->FetchHeading(text_buffer, sizeof(text_buffer));
-        if (likely_length) {
+        auto maybe_heading = results->FetchHeading(&length);
+        if (maybe_heading) {
             body.append("\"")
-                .append(text_buffer, likely_length)
+                .append(maybe_heading.value_checked().get(), length)
                 .append("\",");
         } else {
-            std::error_code &e = likely_length.error_code();
+            std::error_code &e = maybe_heading.error_code();
 
             // Do not log things if the dictionary returned an unexpected
             // result type error. Actually, this is quite legitimate
@@ -157,7 +154,7 @@ void SearchAction::SearchDict(simplify::Repository &repository,
                 std::cout << "An error occurred while retrieving heading "
                           << "for a search result with GUID " << text_buffer
                           << "from " << dict.GetName() << ": "
-                          << likely_length.error_code().message()
+                          << maybe_heading.error_code().message()
                           << std::endl;
             }
 
@@ -165,19 +162,19 @@ void SearchAction::SearchDict(simplify::Repository &repository,
             continue;
         }
 
-        likely_length = results->FetchTags(text_buffer, sizeof(text_buffer));
-        if (likely_length) {
+        auto maybe_tags = results->FetchTags(&length);
+        if (maybe_tags) {
             // Only append tags if the string is not empty.
-            if (likely_length > 0) {
+            if (length > 0) {
                 body.append("\"")
-                    .append(text_buffer, likely_length)
+                    .append(maybe_tags.value_checked().get(), length)
                     .append("\",");
             }
         } else {
             std::cout << "An error occurred while retrieving tags for a "
                       << "search entry with GUID " << text_buffer
                       << " from " << dict.GetName() << ": "
-                      << likely_length.error_code().message() << std::endl;
+                      << maybe_tags.error_code().message() << std::endl;
             body.erase(result_start);
         }
 

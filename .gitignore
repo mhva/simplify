@@ -1,7 +1,7 @@
-.gitignore
 *.swp
 *.pyc
 *.mk
-*.Makefile
-Makefile
-out
+.DS_Store
+third_party/depot_tools/
+third_party/v8/
+third_party/.gclient*

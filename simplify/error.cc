@@ -29,7 +29,7 @@ namespace simplify {
 
 class simplify_category_ : public std::error_category {
 public:
-    const char *name() const {
+    const char *name() const noexcept {
         return "simplify";
     }
 
@@ -83,7 +83,7 @@ public:
 
 class eb_category_ : public std::error_category {
 public:
-    const char *name() const {
+    const char *name() const noexcept {
         return "eb";
     }
 

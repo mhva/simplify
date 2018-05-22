@@ -18,45 +18,64 @@
    Fifth Floor, Boston, MA 02110-1301, USA.
 */
 
-#include <string.h>
 #include <cstdio>
 #include <cstdlib>
+
+#include <filesystem>
+#include <stdexcept>
+
 #include "options.hh"
 
 namespace simplifyd
 {
 
-static char *GetDefaultRepositoryDir()
-{
-    const char *suffix = "repository";
-    char *home = getenv("HOME");
-    if (home == NULL)
-        return NULL;
-
-    char *dir = static_cast<char *>(malloc(strlen(home) +
-                                           strlen(SIMPLIFY_CONFIG_PATH) +
-                                           sizeof(suffix) + 3));
-    sprintf(dir, "%s/%s/%s", home, SIMPLIFY_CONFIG_PATH, suffix);
-    return dir;
-}
-
-static char *GetDefaultHtmlDir()
-{
-    return strdup(SIMPLIFY_WWWROOT);
-}
-
 Options::Options()
     : port_(8000),
-      repository_dir_(GetDefaultRepositoryDir()),
-      html_dir_(GetDefaultHtmlDir()),
+      html_dir_(SIMPLIFY_WWWROOT),
       daemonize_(false)
 {
+    std::filesystem::path config_dir_path;
+
+#if defined(SIMPLIFY_DARWIN)
+    if (home != nullptr) {
+        config_dir_path = getenv("HOME");
+        config_dir_path.append("Library").append("Simplify");
+    }
+#elif defined(SIMPLIFY_WINDOWS)
+    // FIXME: use win32 API to retrieve LOCALAPPDATA path, getenv() is not
+    // unicode-aware.
+    if (getenv("LOCALAPPDATA") != nullptr) {
+        config_dir_path = getenv("LOCALAPPDATA");
+        config_dir_path.append("Simplify");
+    }
+#else
+    if (getenv("XDG_CONFIG_HOME") != nullptr) {
+        config_dir_path = getenv("XDG_CONFIG_HOME");
+        config_dir_path.append("simplify");
+    } else if (getenv("HOME") != nullptr) {
+        config_dir_path = getenv("HOME");
+        config_dir_path.append(".config");
+        config_dir_path.append("simplify");
+    }
+#endif
+
+    if (config_dir_path.empty()) {
+        if (getenv("HOME") != nullptr) {
+            config_dir_path = getenv("HOME");
+            config_dir_path.append(".simplify");
+        } else {
+            throw std::runtime_error("Unable to determine config path");
+        }
+    }
+
+    std::filesystem::path repository_path = config_dir_path;
+    repository_path.append("repository.js");
+
+    repository_config_ = repository_path.string();
 }
 
 Options::~Options()
 {
-    free(repository_dir_);
-    free(html_dir_);
 }
 
 void Options::SetPort(int port)
@@ -64,16 +83,14 @@ void Options::SetPort(int port)
     port_ = port;
 }
 
-void Options::SetRepositoryDir(const char *path)
+void Options::SetRepositoryConfigPath(const char *path)
 {
-    free(repository_dir_);
-    repository_dir_ = strdup(path);
+    repository_config_ = path;
 }
 
 void Options::SetHtmlDir(const char *path)
 {
-    free(html_dir_);
-    html_dir_ = strdup(path);
+    html_dir_ = path;
 }
 
 void Options::SetDaemonize(bool daemonize)
@@ -86,14 +103,19 @@ int Options::GetPort() const
     return port_;
 }
 
-const char *Options::GetRepositoryDir() const
+const char *Options::GetConfigDir() const
 {
-    return repository_dir_;
+    return config_dir_.c_str();
+}
+
+const char *Options::GetRepositoryConfigPath() const
+{
+    return repository_config_.c_str();
 }
 
 const char *Options::GetHtmlDir() const
 {
-    return html_dir_;
+    return html_dir_.c_str();
 }
 
 bool Options::GetDaemonize() const

@@ -33,14 +33,13 @@ void ContextAction::Handle(simplify::Repository &repository,
                            HttpResponse &response)
 {
     response.AddHeader("Content-Type", "application/json; charset=utf-8");
-    response.AddHeader("Expires", "Tue, 1 Sep 2015 00:00:00 GMT");
-    response.AddHeader("Cache-Control", "max-age=3600,public");
+    response.AddHeader("Cache-Control", "no-cache");
 
     std::string &body = response.GetBody();
     body.append("{\"dicts\":[");
 
     for (size_t i = 0; i < repository.GetDictionaryCount(); ++i) {
-        simplify::Dictionary *dict = repository.GetDictionaryByIndex(i);
+        auto dict = repository.GetDictionary(i);
 
         // Append the name.
         {

@@ -21,14 +21,21 @@
 #ifndef DICTIONARY_HH_
 #define DICTIONARY_HH_
 
+#include <memory>
 #include <string>
 #include <system_error>
 #include <vector>
 
-#include <simplify/config.hh>
 #include <simplify/likely.hh>
 
 namespace simplify {
+
+enum class DictionaryType {
+    Unknown,
+    Epwing
+};
+
+class Repository;
 
 /**
  * A base class for implementing an accessor for custom dictionary type.
@@ -37,23 +44,24 @@ class Dictionary {
 public:
     class SearchResults {
     public:
-        virtual ~SearchResults() {}
+        virtual ~SearchResults() = default;
 
         virtual size_t GetCount() const = 0;
         virtual std::error_code SeekNext() = 0;
 
         virtual Likely<size_t> FetchGuid(char *buffer, size_t size) = 0;
-        virtual Likely<size_t> FetchHeading(char *buffer, size_t size) = 0;
-        virtual Likely<size_t> FetchTags(char *buffer, size_t size) = 0;
+        virtual Likely<std::unique_ptr<char[]>> FetchHeading(size_t *size) = 0;
+        virtual Likely<std::unique_ptr<char[]>> FetchTags(size_t *size) = 0;
     };
 
-    Dictionary(Config *conf);
+    explicit Dictionary(const char *name);
+    explicit Dictionary(std::string name);
     virtual ~Dictionary();
 
     /**
      * Searches the dictionary using specified expression.
      *
-     * \param expr An UTF-8 encoded search expression.
+     * \param expr A UTF-8 encoded search expression.
      * \param limit Maximum number of results to fetch.
      *
      * NOTE: Every dictionary type has its own search behavior, specifics
@@ -97,27 +105,6 @@ public:
     /**
      * Reads text from the dictionary.
      *
-     * \param[in] guid A GUID of a dictionary entity.
-     * \param[out] buffer A pointer to a buffer that will receive text from
-     *  the dictionary.
-     * \param[in] buffer_size Size of the receiving @buffer.
-     *
-     * \note By default all dictionary implementations return HTML formatted
-     *  text, but user scripts can override this behavior and use custom text
-     *  formatting. The text returned from this function is always UTF-8
-     *  encoded.
-     *
-     * \return Returns a number of characters read from the dictionary.
-     *  If the given buffer weren't large enough the simplify::buffer_exhausted
-     *  error will be returned.
-     */
-    virtual Likely<size_t> ReadText(const char *guid,
-                                    char *buffer,
-                                    size_t buffer_size) = 0;
-
-    /**
-     * Reads text from the dictionary.
-     *
      * \param[in]  guid A GUID of a dictionary entity.
      * \param[out] ptr  A pointer that will receive a text from the dictionary.
      *
@@ -128,7 +115,8 @@ public:
      *
      * \return Returns a number of characters read from the dictionary.
      */
-    virtual Likely<size_t> ReadText(const char *guid, char **ptr) = 0;
+    virtual Likely<std::unique_ptr<char[]>> ReadText(const char *guid,
+                                                     size_t *text_length) = 0;
 
     /**
      * Returns dictionary name.
@@ -141,17 +129,38 @@ public:
     void SetName(const std::string &name);
 
     /**
-     * Returns configuration object associated with the dictionary.
+     * Returns dictionary's type.
      */
-    Config &GetConfig();
+    virtual DictionaryType GetType() const = 0;
 
     /**
-     * Returns configuration object associated with the dictionary.
+     * Returns repository that this dictionary is part of. If there's no
+     * repository or it's been deleted, returns an empty shared_ptr.
      */
-    const Config &GetConfig() const;
+    std::shared_ptr<Repository> GetRepository();
+
+    /**
+     * Returns repository that this dictionary is part of.
+     */
+    std::shared_ptr<const Repository> GetRepository() const;
 
 protected:
-    Config *conf_;
+    /**
+     * Sets parent repository.
+     */
+    void SetRepository(std::shared_ptr<Repository> repo);
+
+    /**
+     * Short-hand for calling GetRepository()->SaveState() (with neccessary
+     * safe-guards).
+     */
+    std::error_code SaveState();
+
+private:
+    friend class Repository;
+
+    std::weak_ptr<Repository> repo_;
+    std::string name_;
 };
 
 }  // namespace simplify

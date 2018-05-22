@@ -21,6 +21,8 @@
 #ifndef LIBSIMPLIFY_UTILS_HH_
 #define LIBSIMPLIFY_UTILS_HH_
 
+#include <functional>
+#include <memory>
 #include <system_error>
 #include <utility>
 
@@ -34,18 +36,11 @@
 
 namespace simplify {
 
-/**
- * Reads contents of the file specified with the @filename parameter into
- * a buffer. Returns a pointer to the buffer if succeeds or NULL if fails.
- */
-std::pair<char *, size_t> ReadFile(const char *filename,
-                                   std::error_code &error);
+template<typename T>
+using malloc_unique_ptr = std::unique_ptr<T, decltype(&::free)>;
 
 /**
  * Converts unsigned integer to string.
- *
- * There is no way to detect conversion failure, so this function should
- * be used to convert only trusted integers.
  *
  * \note The @buffer is not automatically NULL terminated.
  * \return Returns number of bytes stored in the @buffer.
@@ -64,6 +59,11 @@ size_t EscapeDoubleQuotes(const char *input,
                           size_t input_length,
                           char *buffer,
                           size_t buffer_size);
+
+/**
+ * Case-insensitive comparison of two strings for equality.
+ */
+bool StreqCaseFold(const std::string &s1, const std::string &s2);
 
 }  // namespace simplify
 

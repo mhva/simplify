@@ -18,164 +18,164 @@
    Fifth Floor, Boston, MA 02110-1301, USA.
 */
 
-#ifdef SIMPLIFY_POSIX
-# include <errno.h>
-# include <sys/types.h>
-# include <sys/stat.h>
-# include <unistd.h>
-# include <dirent.h>
-#else
-# include <Windows.h>
-#endif
-
-#include <string.h>
-
 #include <algorithm>
+#include <cassert>
+#include <iomanip>
 #include <string>
 
+#include <nowide/fstream.hpp>
+#include <nlohmann/json.hpp>
+
 #include "epwing/epwing-dictionary.hh"
-#include "config.hh"
 #include "error.hh"
+#include "utils.hh"
 
 #include "repository.hh"
 
 namespace simplify {
 
-static Likely<Dictionary *> DictionaryFromConfig(Config *conf)
-{
-    int dict_type;
-    if (!(*conf)["Dictionary"].ReadInt32("type", &dict_type))
-        return make_error_code(simplify_error::bad_configuration);
-
-    switch (static_cast<DictionaryType>(dict_type)) {
-        case DictionaryType::Epwing: {
-            Likely<EpwingDictionary *> likely_dict =
-                EpwingDictionary::New(conf);
-
-            if (likely_dict)
-                return (Dictionary *)likely_dict;
-            else
-                return likely_dict.error_code();
-        }
-        default: {
-            return make_error_code(simplify_error::index_out_of_range);
-        }
+static void to_json(nlohmann::json &json, DictionaryType t) {
+    switch (t) {
+    case DictionaryType::Epwing:
+        json = "epwing";
+        break;
+    default:
+        assert(!"Trying to serialize an unknown dictionary type");
+        json = "unknown";
+        break;
     }
 }
 
-static Likely<Dictionary *> DictionaryFromDirectory(const std::string &dict_dir)
+static void to_json(nlohmann::json &json, Dictionary &d) {
+    switch (d.GetType()) {
+    case DictionaryType::Epwing: {
+        auto epwing = reinterpret_cast<EpwingDictionary *>(&d);
+        json = nlohmann::json{
+            {"name", d.GetName()},
+            {"type", d.GetType()},
+            {"state", epwing}
+        };
+        break;
+    }
+    default:
+        assert(!"Trying to serialize unsupported dictionary type");
+    }
+}
+
+static Likely<Dictionary *> EpwingDictionaryFromConfig(const nlohmann::json &j)
 {
-    Likely<Config *> likely_conf =
-        Config::New((dict_dir + "/config").c_str());
+    using json = nlohmann::json;
 
-    if (likely_conf) {
-        Likely<Dictionary *> likely_dict = DictionaryFromConfig(likely_conf);
+    auto path = j["path"].get_ref<const json::string_t &>();
+    auto name = j["name"].get_ref<const json::string_t &>();
+    Likely<EpwingDictionary *> maybe_dict;
 
-        if (!likely_dict)
-            delete *likely_conf;
-
-        return likely_dict;
+    if (auto state = j["state"]; state.is_object()) {
+        maybe_dict = EpwingDictionary::NewWithState(
+            name.c_str(),
+            path.c_str(),
+            state
+        );
     } else {
-        return likely_conf.error_code();
+        // No state sub-key => create bare-bones instance.
+        maybe_dict = EpwingDictionary::New(name.c_str(), path.c_str(), nullptr);
+    }
+
+    if (maybe_dict) {
+        return *maybe_dict;
+    } else {
+        return maybe_dict.error_code();
     }
 }
 
-Repository::Repository(const char *repository_path)
-    : repository_path_(repository_path)
+static Likely<Repository::DictionaryList>
+    RestoreDictionaryList(std::ifstream &stream)
+{
+    using json = nlohmann::json;
+    Repository::DictionaryList result;
+
+    try {
+        json root;
+        stream >> root;
+
+        auto dicts = root["dicts"].get_ref<const json::array_t &>();
+        for (auto &dict : dicts) {
+            auto type = dict["type"].get_ref<const json::string_t &>();
+            Likely<Dictionary *> maybe_dict;
+
+            if (StreqCaseFold(type, "epwing")) {
+                maybe_dict = EpwingDictionaryFromConfig(dict);
+            } else {
+                // FIXME: report invalid dictionary type.
+                continue;
+            }
+
+            if (!maybe_dict) {
+                // FIXME: inappropriate error code.
+                return make_error_code(simplify_error::bad_configuration);
+            }
+            result.push_back(std::shared_ptr<Dictionary>(*maybe_dict));
+        }
+    } catch (...) {
+        return make_error_code(simplify_error::bad_configuration);
+    }
+    return std::move(result);
+}
+
+Repository::Repository(const char *config_path, DictionaryList &&dicts)
+    : config_path_(config_path)
+    , dicts_(std::move(dicts))
 {
 }
 
 Repository::~Repository()
 {
-    std::for_each(dicts_.begin(), dicts_.end(), [](Dictionary *d) {delete d;});
 }
 
-Likely<Dictionary *> Repository::NewDictionary(const char *name,
-                                               const char *path,
-                                               DictionaryType type)
+std::error_code Repository::SaveState()
 {
-    if (strlen(name) == 0)
-        return make_error_code(simplify_error::empty_string);
-
-    std::string dict_dir = repository_path_ + "/" + name;
-
-#if defined(SIMPLIFY_POSIX)
-    // Ensure that we are not going to overwrite an existing dictionary by
-    // checking whether configuration file exists or not.
-    if (access((dict_dir + "/config").c_str(), F_OK) != 0) {
-        if (errno != ENOENT)
-            return make_error_code(static_cast<std::errc>(errno));
-    } else {
-        return make_error_code(simplify_error::already_exists);
+    nlohmann::json root;
+    for (auto &dict : this->dicts_) {
+        root["dicts"].push_back(*dict);
     }
 
-    // Create a directory for the new dictionary. Do not fail if said
-    // directory already exists.
-    mode_t mode = S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-    if (mkdir(dict_dir.c_str(), mode) != 0 && errno != EEXIST)
-        return make_error_code(static_cast<std::errc>(errno));
-
-#else
-# error "Repository::NewDictionary() is not implemented."
-#endif
-
-    // Create configuration object for dictionary.
-    Config *conf;
-    Likely<Config *> likely_conf = Config::New(dict_dir + "/config");
-
-    if (likely_conf)
-        conf = likely_conf;
-    else
-        return likely_conf.error_code();
-
-    // Save the dictionary type for later use by the DictionaryFromDirectory()
-    // function.
-    (*conf)["Dictionary"].WriteInt32("type", static_cast<int>(type));
-
-    // Finally, instantiate the dictionary.
-    Dictionary *dict;
-    Likely<Dictionary *> likely_dict = DictionaryFromConfig(conf);
-
-    if (!likely_dict) {
-        delete conf;
-        return likely_dict.error_code();
+    nowide::ofstream stream(config_path_);
+    if (!stream) {
+        // FIXME: bad error code.
+        return simplify::bad_configuration;
     }
 
-    dict = likely_dict;
-    dict->SetName(name);
-
-    // Flush configuration to the config file.
-    std::error_code error =conf->Flush();
-    if (!error) {
-        return dict;
-    } else {
-        // Configuration object is owned by dictionary object so it will be
-        // deleted by its destructor.
-        delete dict;
-        return error;
+    try {
+        stream << std::setw(4) << root;
+    } catch (...) {
+        // FIXME: bad error code.
+        return simplify::bad_configuration;
     }
+
+    return make_error_code(simplify_error::success);
 }
 
-void Repository::DeleteDictionary(Dictionary *dict)
+void Repository::AddDictionary(std::unique_ptr<Dictionary> d)
 {
-    // Ensure that the dictionary belongs to this repository.
-    auto pos = std::find(dicts_.begin(), dicts_.end(), dict);
-    if (pos == dicts_.end())
-        return;
+    // It's important to pass repository instance to dictionary for it to be
+    // able to notify repository about state changes.
+    d->SetRepository(shared_from_this());
 
-    std::string config_file = dict->GetConfig().GetFileName();
-    std::string dict_dir = dict->GetConfig().GetEnclosingDirectory();
+    dicts_.push_back(std::move(d));
+    SaveState();
+}
 
-    dicts_.erase(pos);
-    delete dict;
+void Repository::RemoveDictionary(size_t pos)
+{
+    RemoveDictionary(dicts_.begin() + pos);
+}
 
-    // Remove configuration file and enclosing directory if it's empty.
-#ifdef SIMPLIFY_POSIX
-    unlink(config_file.c_str());
-    rmdir(dict_dir.c_str());
-#else
-# error "Repository::DeleteDictionary() is not implemented.";
-#endif
+void Repository::RemoveDictionary(DictionaryList::iterator it)
+{
+    (*it)->SetRepository(nullptr);
+
+    dicts_.erase(it);
+    SaveState();
 }
 
 Repository::DictionaryList::iterator Repository::Begin()
@@ -203,62 +203,43 @@ size_t Repository::GetDictionaryCount() const
     return dicts_.size();
 }
 
-Dictionary *Repository::GetDictionaryByIndex(size_t index)
+std::shared_ptr<Dictionary> Repository::GetDictionary(size_t pos)
 {
-    if (index < dicts_.size())
-      return dicts_[index];
+    if (pos < dicts_.size())
+      return dicts_[pos];
     else
-      return NULL;
+      return nullptr;
 }
 
-const Dictionary *Repository::GetDictionaryByIndex(size_t index) const
+std::shared_ptr<const Dictionary> Repository::GetDictionary(size_t pos) const
 {
-    if (index < dicts_.size())
-      return dicts_[index];
+    if (pos < dicts_.size())
+      return dicts_[pos];
     else
-      return NULL;
+      return nullptr;
 }
 
-DictionaryType Repository::IdentifyDictionary(const char *path)
+Likely<std::shared_ptr<Repository>> Repository::New(const char *config_path)
 {
-    return DictionaryType::Epwing;
-}
-
-Likely<Repository *> Repository::New(const char *repository_path)
-{
-#ifdef SIMPLIFY_POSIX
-    DIR *dir = opendir(repository_path);
-
-    if (dir == NULL)
-        return make_error_code(static_cast<std::errc>(errno));
-
-    dirent *dir_entry;
-    Repository *repository = new Repository(repository_path);
-
-    // Each directory in the repository supposed to be a dictionary entry.
-    // Read each directory and try to restore a dictionary.
-    while ((dir_entry = readdir(dir))) {
-        // Ensure that configuration file is present in each directory in the
-        // repository.
-        std::string dict_dir;
-        dict_dir.append(repository_path).append(1, '/') \
-                .append(dir_entry->d_name);
-
-        // Ignore current directory if we can't reach configuration file or
-        // it doesn't have appropriate permissions.
-        if (access((dict_dir + "/config").c_str(), R_OK) != 0)
-            continue;
-
-        Likely<Dictionary *> likely_dict = DictionaryFromDirectory(dict_dir);
-        if (likely_dict)
-            repository->dicts_.push_back(likely_dict);
+    // Open and parse config. Use nowide to handle Windows business.
+    auto stream = nowide::ifstream(config_path);
+    if (!stream) {
+        auto *r = new Repository(config_path, DictionaryList{});
+        return std::shared_ptr<Repository>(r);
     }
 
-    closedir(dir);
-    return repository;
-#else
-# error "Repository::New() is not implemented";
-#endif
+    auto maybe_list = RestoreDictionaryList(stream);
+    if (maybe_list) {
+        auto r = new Repository(config_path, std::move(*maybe_list));
+        auto sr = std::shared_ptr<Repository>(r);
+
+        // Pass new repository instance to each dictionary.
+        for (auto &dict : r->dicts_) {
+            dict->SetRepository(sr);
+        }
+        return sr;
+    }
+    return maybe_list.error_code();
 }
 
 }  // namespace simplify

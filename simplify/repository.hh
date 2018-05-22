@@ -21,46 +21,50 @@
 #ifndef LIBSIMPIFY_REPOSITORY_HH_
 #define LIBSIMPIFY_REPOSITORY_HH_
 
+#include <memory>
 #include <string>
 #include <vector>
+#include <simplify/dictionary.hh>
 #include <simplify/likely.hh>
 
 namespace simplify {
 
-enum class DictionaryType {
-    Unknown,
-    Epwing
-};
-
-class Dictionary;
-class Repository
+class Repository : public std::enable_shared_from_this<Repository>
 {
 public:
-    typedef std::vector<Dictionary *> DictionaryList;
+    typedef std::vector<std::shared_ptr<Dictionary>> DictionaryList;
 
     /**
-     * Creates dictionary object and registers it in the repository.
+     * Saves repository state to disk.
      *
-     * \param name Name of the dictionary. Dictionary name will be used when
-     *  initializing files and directories in the repository. Make sure that
-     *  the name doesn't contain special characters forbidden to use by the
-     *  underlying filesystem.
-     * \param path Path to the dictionary file/directory.
-     * \param type Specifies dictionary type. If the dictionary type is not
-     *  known in advance, it is possible to detect it with the
-     *  @IdentifyDictionary() method call.
+     * \return Returns error code, if any.
      */
-    Likely<Dictionary *> NewDictionary(const char *name,
-                                       const char *path,
-                                       DictionaryType type);
+    std::error_code SaveState();
 
     /**
-     * Unregisters dictionary object from the repository and destroys it.
+     * Adds dictionary to this repository. Adding dictionary means that it
+     * will be automatically restored when this repository is created again
+     * (e.g. next time program launches).
      *
-     * \note After calling this function user scripts will be left intact,
-     *  but dictionary configuration will be completely erased.
+     * \param d Pointer to dictionary.
      */
-    void DeleteDictionary(Dictionary *dict);
+    void AddDictionary(std::unique_ptr<Dictionary> d);
+
+    /**
+     * Removes dictionary from this repository. The lifetime of the dictionary
+     * instance is governed by shared_ptr, and, unless there's no external
+     * references, the actual instance won't be deleted.
+     *
+     * \param pos Dictionary index.
+     */
+    void RemoveDictionary(size_t pos);
+
+    /**
+     * Removes dictionary from this repository.
+     *
+     * param it Iterator pointing to the dictionary entry.
+     */
+    void RemoveDictionary(DictionaryList::iterator it);
 
     /**
      * Returns iterator object pointing to the beginning of the dictionary
@@ -81,51 +85,31 @@ public:
     size_t GetDictionaryCount() const;
 
     /**
-     * Returns a dictionary with index @index from the repository.
+     * Returns a dictionary with index @pos from the repository.
      *
      * \return Returns a pointer to the dictionary object; if the dictionary
      *  with specified index doesn't exist in the repository, NULL is returned.
      */
-    Dictionary *GetDictionaryByIndex(size_t index);
-    const Dictionary *GetDictionaryByIndex(size_t index) const;
-
-    /**
-     * Tries to guess dictionary type.
-     *
-     * \note Currently, all supported dictionary formats can be detected
-     *  reliably.
-     *
-     * \return Returns dictionary type. If the method fails to detect dictionary
-     *  type, DictionaryType::Unknown will be returned.
-     */
-    static DictionaryType IdentifyDictionary(const char *path);
+    std::shared_ptr<Dictionary> GetDictionary(size_t pos);
+    std::shared_ptr<const Dictionary> GetDictionary(size_t pos) const;
 
     /**
      * Creates or restores dictionary repository.
      *
-     * \param repository_path Directory where repository should be initialized.
-     *  The directory must exist and must be accessible by the current user.
-     *
-     * \note If the repository at this given directory doesn't exist, it will
-     *  be created. In this case user must have read/write permissions for
-     *  this directory.
-     *
-     * \note It is not advisable to create repository in the directory where
-     *  some files do already exist. The function will not fail just because of
-     *  this, but beware, creating repository in a non-empty directory might
-     *  lead to a loss of some data.
+     * \param config_path Path to configuration file. If this file does not
+     *  exist or is null, an empty repository will be created.
      */
-    static Likely<Repository *> New(const char *repository_path);
+    static Likely<std::shared_ptr<Repository>> New(const char *config_path);
 
 private:
-    Repository(const char *repository_path);
+    Repository(const char *config_path, DictionaryList &&dicts);
 
 public:
     ~Repository();
 
 private:
+    std::string config_path_;
     DictionaryList dicts_;
-    std::string repository_path_;
 };
 
 }  // namespace simplify

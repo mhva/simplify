@@ -18,17 +18,23 @@
    Fifth Floor, Boston, MA 02110-1301, USA.
 */
 
+#ifdef SIMPLIFY_POSIX
 #include <getopt.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <unistd.h>
+#endif
 
 #include <stdlib.h>
 #include <string.h>
 
 #include <cassert>
 #include <iostream>
+#include <string>
 
+#include <simplify/simplify.hh>
 #include <simplify/repository.hh>
+#include <simplify/epwing/epwing-dictionary.hh>
 
 #include "articleaction.hh"
 #include "contextaction.hh"
@@ -41,33 +47,35 @@ namespace simplifyd {
 
 static void PrintHelpAndExit()
 {
-    const char *help_text =
-R"#(
-simplifyd [options]
-Daemon that serves search and browse requests from Simplify applications.
+    Options default_options{};
+
+    std::cout << R"#(
+Usage: simplifyd [options]
+
+Simplify server daemon.
 
   -p PORT, --port PORT
-      Use PORT as the port number for web server. Default: 8000.
+      Use PORT as the port number for web server. Default: )#"
+        << default_options.GetPort() << R"#(.
 
-  -r REPOSITORY-PATH, --repository REPOSITORY-PATH
-      Root directory of the repository from where dictionaries should
-      be loaded. If the specified directory does not exist, program will
-      attempt to create it.
-      Default: ${HOME}/)#" SIMPLIFY_CONFIG_PATH R"#(/repository.
+  -r CONFIG-PATH, --repository CONFIG-PATH
+      Path to repository configuration file.
+      Default: )#" << default_options.GetHtmlDir() << R"#(
 
   -d HTML-DIR, --html-dir HTML-DIR
-      Root directory of the web server. The web server uses this directory
-      to serve web resources (html files, images, css stylesheets, etc.).
-      Default: )#" SIMPLIFY_WWWROOT R"#(
+      Directory containing program's assets.
+      Default: )#" << default_options.GetRepositoryConfigPath() << R"#(
 
   -b, --background
-      Detach and run in background. Default: Run in foreground.
+      Detach and run in background. Default: )#"
+        << (default_options.GetDaemonize()
+            ? "Run in background"
+            : "Run in foreground")
+        << R"#(.
 
   -h, --help
       Print this help text and exit.
-)#";
-
-    std::cout << help_text << std::endl;
+)#" << std::endl;
     exit(0);
 }
 
@@ -104,7 +112,7 @@ static bool ParseCommandLine(int argc, char *argv[], Options &options)
                 break;
             }
             case 'r': {
-                options.SetRepositoryDir(optarg);
+                options.SetRepositoryConfigPath(optarg);
                 break;
             }
             case 'd': {
@@ -129,6 +137,7 @@ static bool ParseCommandLine(int argc, char *argv[], Options &options)
 
 int main(int argc, char *argv[])
 {
+    simplify::Initialize();
     simplifyd::Options options;
     if (!simplifyd::ParseCommandLine(argc, argv, options))
         return 1;
@@ -163,8 +172,7 @@ int main(int argc, char *argv[])
     }
 
     int return_code;
-    simplify::Likely<simplify::Repository *> likely_r =
-        simplify::Repository::New(options.GetRepositoryDir());
+    auto likely_r = simplify::Repository::New(options.GetRepositoryConfigPath());
 
     // Start the web server if we've successfully opened repository.
     if (likely_r) {
@@ -176,7 +184,7 @@ int main(int argc, char *argv[])
         return_code = server.Start(options) ? 0 : 1;
     } else {
         std::cout << "Unable to open repository '"
-                  << options.GetRepositoryDir()<< "': "
+                  << options.GetRepositoryConfigPath() << "': "
                   << likely_r.error_code().message() << "." << std::endl;
         return_code = 1;
     }
