@@ -1,14 +1,16 @@
-# Simplify Dictionary
+# Simplify
 
-Let's you read commercial dictionaries compiled into highly obscure **EPWING** format. While the format is no longer used for dictionaries coming out today, there's still a lot of old, high-quality commercial dictionaries that are still unavailable on a better digital medium out there.
+Simplify is a program that lets you read dictionaries that were created in a highly obscure format called **EPWING**. While it is no longer used today, there's still a lot of old, but high quality stuff out there that is still unavailable on a better digital medium.
+
+![Simplify dictionary window](markdown/After2.png)
 
 # Features
 
- * Basic navigation
- * Highlight a word within an article to show its definition
- * Wildcard expressions in search queries
- * Customized article formatting with user-scripts written in JavaScript
- * Out-of-the-box formatting support for popular dictionaries
+ * Browse **EPWING** dictionaries!
+ * Highlight a word within a dictionary article to show its definition inline.
+ * Use wildcard expressions in search queries to search with incomplete terms.
+ * Customize how article is displayed with a custom script written in JavaScript.
+ * Out-of-the-box formatting support for some popular dictionaries (check how it looks [before](markdown/Before.png) and [after](markdown/After.png) applying a script).
 
 # Supported OS
 
@@ -43,7 +45,7 @@ $ cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release ../simplify
 $ make
 ```
 
-Note, change the value of `CMAKE_INSTALL_PREFIX`, if you want to install program elsewhere.
+Note, change the value of `CMAKE_INSTALL_PREFIX`, if you want to install **simplify** elsewhere.
 
 Finally, execute `make install` to install the program:
 ```console
@@ -90,7 +92,7 @@ The file should be saved to `$HOME/.config/simplify/repository.js` or, alternati
 
 # Running
 
-Start `simplifyd` from terminal and point your web-browser to `http://127.0.0.1:8000`. See `simplifyd --help` for more options.
+Start `simplifyd` from terminal and point your web-browser to `http://127.0.0.1:8000`. See `simplifyd --help` for additional options.
 
 # TODO
 
@@ -99,5 +101,5 @@ Start `simplifyd` from terminal and point your web-browser to `http://127.0.0.1:
    - [ ] Handwriting recognition
    - [ ] Decompose character into radicals
  - [ ] GUI for managing dictionaries
- - [ ] Port to electron
+ - [ ] Electron port
  - [ ] Windows port
